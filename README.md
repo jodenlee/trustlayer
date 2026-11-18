@@ -2,7 +2,7 @@
 
 **Decentralized Freelance Escrow and Dispute Resolution Protocol**
 
-Implemented today: milestone escrow, juror staking/selection, on-chain dispute voting and atomic settlement, plus the Phase 2D protocol treasury and fixed juror pull rewards. **Penalties, reputation and the frontend are NOT implemented.** This is not audited or ready for handling real funds.
+Implemented today: milestone escrow, juror staking/selection, on-chain dispute voting and atomic settlement, protocol treasury and fixed juror pull rewards, plus the **Phase 3A frontend foundation**. The frontend is a clearly labeled interface preview with no wallet, RPC, transaction or backend integration. Penalties and reputation remain unimplemented. This protocol is not audited or ready for handling real funds.
 
 ## Requirements
 
@@ -13,12 +13,12 @@ Implemented today: milestone escrow, juror staking/selection, on-chain dispute v
 ## Quick start (VS Code / PowerShell)
 
 ```powershell
-npm install
+npm ci
 npm run compile
 npm test
 ```
 
-After the first `npm install`, commit the generated `package-lock.json` so the team uses consistent dependency versions. Then change the GitHub Actions install step to `npm ci`. Avoid mixing Hardhat 2 and 3 packages.
+The dependency lockfile is tracked; use `npm ci` for reproducible installation and `npm install` only for intentional dependency updates. Avoid mixing Hardhat 2 and 3 packages.
 
 Start a persistent local blockchain:
 
@@ -40,8 +40,9 @@ The complete deployment returns local token, treasury, escrow, registry and arbi
 contracts/             core Solidity logic and mock token
 ignition/modules/       reproducible deployments
  test/                  integration/security test workspace
-web/                    reserved for Next.js frontend
-packages/contracts/     future generated ABI + address manifest
+apps/web/               Next.js frontend with isolated dependencies and lockfile
+web/                    pointer to the current frontend
+packages/contracts/     generated ABIs, typed clients and verified local manifest
 docs/                   architecture and delivery milestones
 .github/workflows/      CI on every push and PR
 ```
@@ -91,6 +92,14 @@ Finalization reserves 12 mUSD in arbitration for the three assigned jurors, incl
 
 Use `ignition/modules/Phase2D.ts` for the complete new local stack. It pins the treasury sources, enables arbitration rewards before any dispute and performs both existing arbitration authorizations. Earlier deployed contracts require redeployment; there is no sweep or migration of old retained fees. See [Phase 2D architecture, invariants and verification](docs/PHASE2D.md).
 
+## Phase 2E integration and frontend handoff
+
+`npm.cmd run verify:local` starts and safely stops two dedicated loopback nodes, deploys the actual Phase2D module through Ignition CLI, validates all references and bytecode, and verifies idempotent deployment resume. The public result is `reports/phase2e/verification.json`. It uses port 18545 by default and refuses to reuse an occupied port.
+
+`npm.cmd run export:abis` exports the five production ABIs and complete function/event inventory to `packages/contracts/generated/`. After a persistent local deployment, `npm.cmd run export:contracts` validates and exports its addresses, chain ID, hashes and public authorities. The TypeScript package provides typed Viem/Wagmi configurations and live chain/code validation. The verification-generated manifest is ephemeral and its node is stopped; re-export from your actual persistent node before frontend use.
+
+The complete suite has 156 tests, including normal first-milestone payment followed by all four arbitration outcomes on the second milestone. Production Solidity and the earlier 143 tests are unchanged in this phase. See [Phase 2E workflows, security review and exact export/deployment commands](docs/PHASE2E.md) and the [contract package guide](packages/contracts/README.md). No frontend or backend is implemented.
+
 ## Design decisions
 
 | Setting | Value |
@@ -105,31 +114,30 @@ Use `ignition/modules/Phase2D.ts` for the complete new local stack. It pins the 
 | Arbitration | 3 jurors; 15 mUSD opener-paid fee; 12-hour response then 24-hour voting; 50/50 fallback |
 | Phase 2D dispute-fee allocation | 3 mUSD treasury; 12 mUSD reserved for three 4 mUSD juror claims |
 
-## GitHub setup
+## Development workflow
 
-1. On GitHub, create a **private** repository named `trustlayer` with **no README, .gitignore, or license** (already provided here).
-2. Extract this starter project to a local folder named `trustlayer`.
-3. In VS Code PowerShell:
+TrustLayer is maintained by one developer with Codex assistance. Follow `AGENTS.md`, use focused changes and review the diff and verification results before committing. Keep credentials, populated environment files, node_modules and cache out of Git. Pushes, merges and public deployments require explicit approval.
+
+The smart-contract verification remains available independently. Phase 3A now adds a local frontend foundation; review it before authorizing Phase 3B wallet and contract-read integration. Backend implementation remains deferred.
+
+## Phase 3A frontend preview
 
 ```powershell
-git init
-git add .
-git commit -m "chore: initialize TrustLayer protocol repository"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/trustlayer.git
-git push -u origin main
+npm.cmd --prefix apps/web ci
+npm.cmd run web:dev
 ```
 
-4. GitHub Settings → Collaborators → invite all teammates; use feature branches and pull requests.
-5. Before committing additional work, verify that `.env`, private keys, node_modules, and cache are ignored.
+Open http://127.0.0.1:3000. No blockchain node or wallet is required. The light, responsive interface covers the landing page, dashboard, projects/draft creation/details, disputes/details, juror workspace, empty transaction history and session preferences. Preview content is explicitly fictional. Drafts are never submitted and wallet controls explain the deferred integration.
 
-## First team assignments
+```powershell
+npm.cmd run web:lint
+npm.cmd run web:typecheck
+npm.cmd run web:build
+npm.cmd run web:start
+```
 
-- **M1 Escrow:** finalize tests for `TrustEscrow.sol`; add milestone protection and invariant checks.
-- **M3 Arbitration:** draft `DisputeArbitration`, `JurorRegistry`, and restricted arbitration interface; coordinate signatures with M1.
-- **M2 Frontend:** design client/freelancer/juror wireframes; implement static Next.js UI after ABI agreement.
-- **M4 Integration:** deployment reproducibility, event manifest, SIWE/evidence architecture; automate end-to-end flow.
+For browser tests, stop any server on port 3000, build first, then use `npm.cmd --prefix apps/web exec -- playwright install chromium` followed by `npm.cmd run web:test`. To use installed Chrome instead, set `$env:PLAYWRIGHT_CHANNEL='chrome'` before running the tests. Tests own and stop their production server. Frontend dependencies and lockfile live only in `apps/web`; root `compile`, `test`, and `typecheck` still verify the blockchain project. See [Phase 3A](docs/PHASE3A.md) for verification results and known limitations.
 
 ## Limits and security
 
-Run `npm install`, `npm run compile`, `npm test` and `npm run typecheck` to verify locally; use `npm.cmd` when PowerShell blocks `npm.ps1`. Do not deposit real assets. Configuration is irreversible; frozen milestones and locked juror stakes require a finalization transaction after voting ends. Rewards require individual claims. Old Phase 2C deployments retain fees without a recovery path; use a fresh Phase 2D stack. Review the phase documents, especially `docs/PHASE2D.md`, before deployment or configuration; unrestricted test harnesses must never be used on a live deployment.
+Run `npm ci`, `npm run compile`, `npm test` and `npm run typecheck` to verify locally; use `npm.cmd` when PowerShell blocks `npm.ps1`. Do not deposit real assets. Configuration is irreversible; frozen milestones and locked juror stakes require a finalization transaction after voting ends. Rewards require individual claims. Old Phase 2C deployments retain fees without a recovery path; use a fresh Phase 2D stack. Review the phase documents, especially `docs/PHASE2D.md` and `docs/PHASE2E.md`, before deployment or configuration; unrestricted test harnesses must never be used on a live deployment.
