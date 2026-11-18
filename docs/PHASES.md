@@ -12,10 +12,10 @@ Source of truth: TrustLayer Solution Design Document v1.0 (2026-11-16).
 - Phase 2A: escrow interface, one-time arbitration configuration, authorized milestone freezing and basis-point settlement; implemented with tests. See [Phase 2A](PHASE2A.md).
 - Phase 2B: JurorRegistry registration, 100 mUSD eligibility and per-assignment locks, deterministic three-juror rotation, conflict exclusions and authorized release; implemented with tests. See [Phase 2B](PHASE2B.md).
 - Phase 2C: DisputeArbitration participant opening, 15 mUSD opener-paid fee custody, 12-hour response followed by 24-hour voting, on-chain majority/50-50 fallback and atomic escrow settlement/stake release; implemented with integration tests. See [Phase 2C](PHASE2C.md).
+- Phase 2D: ProtocolTreasury receives 1% freelancer service fees and 3 mUSD per finalized dispute; arbitration reserves 12 mUSD for three 4 mUSD pull claims. Revenue accounting, owner withdrawals/two-step ownership and a fresh complete local deployment are implemented with integration tests. See [Phase 2D](PHASE2D.md).
 - Remaining protocol work follows and requires separate approval.
-- ProtocolTreasury separate contract (currently placeholder treasury wallet)
 - Juror attendance penalties and any associated reward/slashing rules (not included in Phase 2B)
-- Phase 2D treasury integration and the roadmap's 12 mUSD juror / 3 mUSD protocol fee distribution; Phase 2C tracks portions but retains fees without an outflow path. Resolve the non-upgradeable custody transition before real deployment.
+- Earlier modules retain demo-wallet/Phase 2C fee-retention behavior. Phase 2D requires a fresh stack; old retained fees have no migration or sweep path.
 - Further security hardening and independent review of cross-contract interactions
 
 ## Phase 3 — dApp and evidence
@@ -30,4 +30,4 @@ Source of truth: TrustLayer Solution Design Document v1.0 (2026-11-16).
 - White-paper claim-to-code review and presentation rehearsal
 
 ## Not implemented yet
-Juror penalties and rewards, a real treasury contract, fee distribution/migration, frontend, SIWE, evidence API, event index, production security audit, and optional Sepolia deployment.
+Juror penalties, migration of old deployed funds, frontend, SIWE, evidence API, event index, production security audit, and optional Sepolia deployment. Fixed Phase 2D juror rewards and the protocol treasury are implemented.

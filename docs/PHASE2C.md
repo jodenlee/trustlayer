@@ -1,5 +1,7 @@
 # Phase 2C: dispute resolution and arbitration
 
+Phase 2D integration is now available through a fresh complete deployment; see [Phase 2D](PHASE2D.md). This document describes the preserved Phase 2C fee-retention mode and its original verification. Old deployed bytecode and retained fees are not retroactively migrated.
+
 Phase 2C integrates the existing TrustEscrow and JurorRegistry through `DisputeArbitration`. Their contracts, interfaces, Phase 1/2B deployment modules and existing 63 tests are unchanged. Solidity remains 0.8.28 with Hardhat 3, the Node.js test runner and Viem.
 
 The available design sources are `AGENTS.md`, `docs/PHASES.md`, `docs/PHASE2A.md` and `docs/PHASE2B.md`. The full referenced Solution Design Document v1.0 is not in this repository. The developer explicitly confirmed that the opening participant pays the 15 mUSD fee and that a 12-hour response window precedes 24-hour voting. The roadmap specifies a 12 mUSD juror / 3 mUSD protocol fee allocation; this phase records those portions but does not distribute them.

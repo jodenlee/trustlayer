@@ -6,13 +6,16 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ITrustEscrowArbitration} from "./interfaces/ITrustEscrowArbitration.sol";
+import {IProtocolTreasury} from "./interfaces/IProtocolTreasury.sol";
+import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 
 /// @title TrustLayer TrustEscrow — Phase 1 escrow with Phase 2A arbitration hooks
-/// @notice Production use is NOT intended; arbitration decision logic is not implemented yet.
+/// @notice Local/test escrow; Phase 2D treasury intake is enabled for an ERC-165-compatible treasury.
 /// @dev Settlement design follows the team solution specification: 6-decimal mUSD,
 ///      1% fee on freelancer gross, 1–5 sequential milestones.
 contract TrustEscrow is ReentrancyGuard, ITrustEscrowArbitration {
     using SafeERC20 for IERC20;
+    using ERC165Checker for address;
 
     struct Project {
         address client;
@@ -38,6 +41,7 @@ contract TrustEscrow is ReentrancyGuard, ITrustEscrowArbitration {
     IERC20 public immutable paymentToken;
     address public immutable treasury;
     address public immutable arbitrationConfigurator;
+    bool public immutable usesProtocolTreasury;
     uint256 public nextProjectId;
     uint256 public totalEscrowLiability;
     uint16 public constant SERVICE_FEE_BPS = 100; // 1%
@@ -67,6 +71,8 @@ contract TrustEscrow is ReentrancyGuard, ITrustEscrowArbitration {
         paymentToken = IERC20(token_);
         treasury = treasury_;
         arbitrationConfigurator = msg.sender;
+        usesProtocolTreasury = treasury_.supportsInterface(type(IProtocolTreasury).interfaceId);
+        if (usesProtocolTreasury && address(IProtocolTreasury(treasury_).paymentToken()) != token_) revert InvalidInput();
     }
 
     modifier onlyArbitration() {
@@ -239,7 +245,13 @@ contract TrustEscrow is ReentrancyGuard, ITrustEscrowArbitration {
         if (p.currentMilestone == p.milestoneCount) p.state = ProjectState.COMPLETED;
         if (clientRefund > 0) paymentToken.safeTransfer(p.client, clientRefund);
         if (freelancerNet > 0) paymentToken.safeTransfer(p.freelancer, freelancerNet);
-        if (serviceFee > 0) paymentToken.safeTransfer(treasury, serviceFee);
+        if (serviceFee > 0) {
+            if (usesProtocolTreasury) {
+                // Approve only this fee; the bound treasury pulls and verifies its exact receipt atomically.
+                paymentToken.forceApprove(treasury, serviceFee);
+                IProtocolTreasury(treasury).depositServiceFee(projectId, index, serviceFee);
+            } else paymentToken.safeTransfer(treasury, serviceFee);
+        }
         emit MilestoneSettled(projectId, index, gross, freelancerGross, freelancerNet, clientRefund, serviceFee);
     }
 }

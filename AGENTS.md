@@ -39,11 +39,13 @@
 - Payment token: MockUSD (mUSD), six decimals.
 - Service fee: 1% of freelancer payouts.
 - Dispute fee: 15 mUSD.
+- Phase 2D allocation after finalization: 3 mUSD treasury and 12 mUSD reserved for three assigned jurors' 4 mUSD claims; no vote-based penalties.
 - Juror minimum stake: 100 mUSD.
 - Three jurors per dispute.
 - Majority-based dispute resolution.
 - A 50/50 fallback where the documented voting conditions cannot produce a valid majority.
 - Escrow funds, juror stakes and treasury funds must remain separately accounted for.
+- Juror reward reserves must remain separately accounted for and cannot be funded from escrow principal or staking collateral.
 - Arbitrated milestone funds must never be paid twice.
 - Use explicit and testable rules for all deadlines, timeouts, refunds and rewards.
 
@@ -51,9 +53,11 @@
 
 - `contracts/MockUSD.sol` and `contracts/TrustEscrow.sol` contain the Phase 1 token and milestone escrow. The current compiler configuration is Solidity 0.8.28.
 - Contract tooling uses Hardhat 3, TypeScript ES modules, the Node.js test runner and Viem. Existing executable tests are in `test/TrustEscrow.ts`; `test/README.md` lists additional acceptance tests, not passing-test claims.
-- `ignition/modules/Phase1.ts` deploys the token and escrow locally. Phase 1 uses the deployer wallet as treasury; a separate treasury contract is planned.
+- `ignition/modules/Phase1.ts` retains the historical demo-wallet treasury deployment. Use `ignition/modules/Phase2D.ts` for the complete new local stack with ProtocolTreasury and configured fee/reward permissions.
 - `README.md` describes the current implementation. `docs/PHASES.md` records the roadmap and references the approved TrustLayer Solution Design Document v1.0 (2026-11-16).
-- Phase 2A adds the `ITrustEscrowArbitration` boundary, one-time arbitration configuration, authorized freezing and disputed settlement; see `docs/PHASE2A.md`. Phase 2B adds `JurorRegistry` and `IJurorRegistry`, with 100 mUSD eligibility/per-assignment locks, deterministic three-juror rotation, participant exclusions and authorized release; see `docs/PHASE2B.md`. Phase 2C adds `DisputeArbitration` and `IDisputeArbitration`: the opener pays 15 mUSD, a 12-hour response window precedes 24-hour voting, and permissionless finalization after the deadline applies the two-vote majority or 50/50 fallback and atomically settles escrow/unlocks stakes; see `docs/PHASE2C.md`. Fees are retained with 12 mUSD juror / 3 mUSD protocol accounting and no withdrawal path. Phase 2D must resolve treasury integration/custody transition before real deployment. Juror penalties/rewards, a dedicated treasury contract, the frontend and private evidence storage are not implemented. `web/` currently contains frontend setup guidance only.
+- Phase 2A provides the unchanged `ITrustEscrowArbitration` boundary, one-time arbitration configuration, freezing and disputed settlement; see `docs/PHASE2A.md`. Phase 2B provides `JurorRegistry`/`IJurorRegistry`, 100 mUSD eligibility/per-assignment locks, deterministic three-juror rotation, participant exclusions and release; see `docs/PHASE2B.md`.
+- Phase 2C provides `DisputeArbitration`/`IDisputeArbitration`: the opener pays 15 mUSD, a 12-hour response window precedes 24-hour voting, and permissionless finalization applies the two-vote majority or 50/50 fallback and settles escrow/unlocks stakes; see `docs/PHASE2C.md`.
+- Phase 2D adds ProtocolTreasury, fee-intake/reward interfaces, recognized revenue accounting, owner withdrawals and assigned-juror pull claims; see `docs/PHASE2D.md`. New treasury/source bindings are one-time and reward mode must be enabled before the first dispute. Earlier modules preserve fee-retention behavior, existing tests must remain intact, and old deployed fees cannot be swept or retroactively migrated. Redeploy a fresh local stack for Phase 2D. Penalties, reputation, frontend and private evidence storage remain unimplemented; `web/` contains setup guidance only.
 - Preserve the existing Phase 1 rules: 1-5 sequential milestones, a 7-day acceptance window, a 48-hour delivery grace period, a 72-hour review window, a 1% fee on the freelancer's gross payout and explicit escrow-liability tracking.
 - Available verification commands are `npm run compile`, `npm test` and `npm run typecheck`. Inspect `package.json`, `hardhat.config.ts` and `.github/workflows/contracts.yml` before changing tooling or verification workflows.
 

@@ -2,7 +2,7 @@
 
 **Decentralized Freelance Escrow and Dispute Resolution Protocol**
 
-Implemented today: the Phase 1 local ERC-20 token and milestone escrow, Phase 2A arbitration hooks, Phase 2B juror staking/selection, and Phase 2C dispute creation, on-chain voting, majority/fallback verdicts and atomic settlement. **Treasury integration, penalties, rewards and the frontend are NOT implemented.** This is not audited or ready for handling real funds.
+Implemented today: milestone escrow, juror staking/selection, on-chain dispute voting and atomic settlement, plus the Phase 2D protocol treasury and fixed juror pull rewards. **Penalties, reputation and the frontend are NOT implemented.** This is not audited or ready for handling real funds.
 
 ## Requirements
 
@@ -29,10 +29,10 @@ npm run node
 In a **second terminal**, deploy locally:
 
 ```powershell
-npx hardhat ignition deploy ignition/modules/Phase1.ts --network localhost
+npx.cmd hardhat ignition deploy ignition/modules/Phase2D.ts --network localhost
 ```
 
-The deployment prints local token and escrow addresses. The localhost network resets when you stop the node; this is expected.
+The complete deployment returns local token, treasury, escrow, registry and arbitration addresses with their permissions configured. The localhost network resets when you stop the node; this is expected. Earlier modules remain available for historical phase verification.
 
 ## Repo layout
 
@@ -79,9 +79,17 @@ Either project participant may open a dispute over the current submitted milesto
 
 Voting starts at the 12-hour response deadline and remains open through the following 24-hour voting deadline, both voting boundaries inclusive. After that deadline, anyone may finalize. Two identical juror votes determine freelancer victory, client victory or a 50/50 split. Without two identical votes, including missing votes, the result is the 50/50 fallback. Finalization atomically settles escrow and unlocks juror stakes while preserving the 1% service fee on freelancer payouts.
 
-Dispute fees remain in arbitration, with the roadmap's 12 mUSD juror / 3 mUSD protocol portions tracked separately; no rewards or fee withdrawals exist. See [Phase 2C design, tests and custody limitations](docs/PHASE2C.md). The non-upgradeable fee-custody transition requires an explicit Phase 2D design decision before real-value deployment.
+The historical Phase 2C module retains dispute fees with separate 12/3 accounting and no reward withdrawals. The Phase 2D stack below explicitly enables the approved distribution. See [Phase 2C design and legacy custody](docs/PHASE2C.md) and [Phase 2D deployment/migration](docs/PHASE2D.md).
 
 `ignition/modules/Phase2C.ts` deploys the full local stack and connects both one-time arbitration authorizations. With a running local Hardhat node, use `npx.cmd hardhat ignition deploy ignition/modules/Phase2C.ts --network localhost`. Earlier deployments already configured to another arbitration address require a fresh local deployment.
+
+## Phase 2D protocol treasury and juror rewards
+
+The dedicated ProtocolTreasury receives the unchanged 1% freelancer service fee and exactly 3 mUSD per finalized dispute. It accounts for revenue separately and permits only its owner to withdraw available recognized revenue, with OpenZeppelin two-step ownership transfer.
+
+Finalization reserves 12 mUSD in arbitration for the three assigned jurors, including abstainers: each may claim 4 mUSD exactly once for that finalized case. Rewards are paid only to the claiming juror and remain reserved until claimed. Principal, collateral, protocol revenue and juror rewards stay in separate custody accounts. Failed intake or settlement reverts the entire finalization; a later failed claim does not consume the juror's entitlement.
+
+Use `ignition/modules/Phase2D.ts` for the complete new local stack. It pins the treasury sources, enables arbitration rewards before any dispute and performs both existing arbitration authorizations. Earlier deployed contracts require redeployment; there is no sweep or migration of old retained fees. See [Phase 2D architecture, invariants and verification](docs/PHASE2D.md).
 
 ## Design decisions
 
@@ -95,6 +103,7 @@ Dispute fees remain in arbitration, with the roadmap's 12 mUSD juror / 3 mUSD pr
 | Service fee | 1% of freelancer's gross payment |
 | Juror staking | 100 mUSD minimum unlocked for selection; 100 mUSD locked per assignment |
 | Arbitration | 3 jurors; 15 mUSD opener-paid fee; 12-hour response then 24-hour voting; 50/50 fallback |
+| Phase 2D dispute-fee allocation | 3 mUSD treasury; 12 mUSD reserved for three 4 mUSD juror claims |
 
 ## GitHub setup
 
@@ -123,4 +132,4 @@ git push -u origin main
 
 ## Limits and security
 
-Run `npm install`, `npm run compile`, `npm test` and `npm run typecheck` to verify locally; use `npm.cmd` when PowerShell blocks `npm.ps1`. Do not deposit real assets. Arbitration configuration is irreversible; frozen milestones and locked juror stakes require a finalization transaction after voting ends. Dispute fees have no withdrawal path in Phase 2C. Review `docs/PHASE2A.md`, `docs/PHASE2B.md` and `docs/PHASE2C.md` before deployment or configuration; unrestricted test harnesses must never be used on a live deployment.
+Run `npm install`, `npm run compile`, `npm test` and `npm run typecheck` to verify locally; use `npm.cmd` when PowerShell blocks `npm.ps1`. Do not deposit real assets. Configuration is irreversible; frozen milestones and locked juror stakes require a finalization transaction after voting ends. Rewards require individual claims. Old Phase 2C deployments retain fees without a recovery path; use a fresh Phase 2D stack. Review the phase documents, especially `docs/PHASE2D.md`, before deployment or configuration; unrestricted test harnesses must never be used on a live deployment.
