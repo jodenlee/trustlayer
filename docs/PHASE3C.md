@@ -170,7 +170,9 @@ npm.cmd run web:dev
 
 Open http://127.0.0.1:3000. Dev/build syncs public metadata automatically; if re-exporting while the app runs, run `npm.cmd --prefix apps/web run contracts:sync` and Retry verification/reload. After legitimate activity, use TRUSTLAYER_VERIFY_FRESH=false for re-export. Keep the node running and follow Phase 2E journal/resume rules. Wrong one-time bindings require a fresh stack. Local verification-generated ephemeral manifests are still rejected.
 
-There is **no faucet UI and MockUSD has no public mint method**. Provision only controlled local test wallets from the initial holder's existing supply. In a separate terminal run `npx.cmd hardhat console --network localhost`, then use the following console workflow with public recipient addresses you control:
+There is **no faucet UI and MockUSD has no public mint method**. For the five-wallet Phase 3D setup, use the reusable [local-only token provisioning script](LOCAL_TOKENS.md). It tops up the client to 2,000 mUSD, freelancer to 100 and each of three jurors to 200, transfers only shortfalls from the verified initial holder and skips wallets already at target. The guide gives all five public-address environment variables and the exact command; no key/seed is used. Local ETH provisioning remains separate.
+
+For a deliberate single-wallet console transfer instead, the following older workflow transfers the specified amount every time and is **not idempotent**. Use the reusable script above for repeatable five-wallet setup. In a separate terminal run `npx.cmd hardhat console --network localhost`, then use public recipient addresses you control:
 
 ```javascript
 const c = await network.create();
