@@ -17,7 +17,8 @@ export function useVerifiedDeployment() {
   const query = useQuery({
     queryKey: ["trustlayer", "deployment", address, chainId, connector?.uid],
     enabled: isConnected && supported && !!connector,
-    staleTime: 0,
+    staleTime: 30_000,
+    refetchOnMount: false,
     gcTime: 0,
     refetchInterval: 30_000,
     queryFn: async ({ signal }) => {

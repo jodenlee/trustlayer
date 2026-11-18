@@ -2,7 +2,7 @@
 
 **Decentralized Freelance Escrow and Dispute Resolution Protocol**
 
-Implemented today: milestone escrow, juror staking/selection, on-chain dispute voting and atomic settlement, protocol treasury and fixed juror pull rewards, plus the frontend foundation and **Phase 3B wallet/read integration**. Injected wallets can connect to a verified local deployment and read real mUSD/public protocol state. Project/case views remain clearly labeled samples; project transactions and backend integration are not enabled. Penalties and reputation remain unimplemented. This protocol is not audited or ready for handling real funds.
+Implemented today: milestone escrow, juror staking/selection, on-chain dispute voting and atomic settlement, protocol treasury and fixed juror pull rewards, plus **Phase 3C client/freelancer workflows**. Injected wallets on a verified local deployment can discover projects, create, approve mUSD, fund, accept, submit a content hash, approve payment and release after review timeout. Connected project views show actual chain data; disconnected project views and dispute/juror pages remain labeled previews. Backend storage, penalties and reputation remain unimplemented. This protocol is not audited or ready for handling real funds.
 
 ## Requirements
 
@@ -118,18 +118,18 @@ The complete blockchain suite has 156 tests, including normal first-milestone pa
 
 TrustLayer is maintained by one developer with Codex assistance. Follow `AGENTS.md`, use focused changes and review the diff and verification results before committing. Keep credentials, populated environment files, node_modules and cache out of Git. Pushes, merges and public deployments require explicit approval.
 
-Smart-contract verification remains available independently. Phase 3A provides the frontend foundation; Phase 3B adds wallet connection and verified local contract reads. Review Phase 3B before authorizing Phase 3C or transaction workflows. Backend implementation remains deferred.
+Smart-contract verification remains available independently. Phase 3A supplies the interface foundation, Phase 3B adds wallet/deployment verification and Phase 3C integrates the existing escrow workflows. Stop for review before Phase 3D. Backend implementation remains deferred.
 
-## Frontend foundation and Phase 3B wallet reads
+## Frontend and Phase 3C escrow workflows
 
 ```powershell
 npm.cmd --prefix apps/web ci
 npm.cmd run web:dev
 ```
 
-Open http://127.0.0.1:3000. Navigation/sample views work without a blockchain node or wallet. The light, responsive interface covers the landing page, dashboard, projects/draft creation/details, disputes/details, juror workspace, empty transaction history and session preferences. Preview content is explicitly fictional and drafts are never submitted. Wallet controls now connect MetaMask/compatible injected wallets; live wallet information is labeled separately.
+Open http://127.0.0.1:3000. Navigation/sample views work without a blockchain node or wallet. Preview content is explicitly fictional. Connected, verified wallets use real dashboard/project/history views and may explicitly submit reviewed escrow transactions. Creation text is session-only: the chain stores its hash, amounts and deadlines. Approval and funding are separate confirmed transactions. No private deliverables are uploaded.
 
-For live reads, start a persistent node on http://127.0.0.1:8545, deploy Phase2D, and export with `TRUSTLAYER_EXPORT_EPHEMERAL=false` using the exact [Phase 3B setup commands](docs/PHASE3B.md). The checked-in ephemeral verification manifest is intentionally rejected. Dev/build syncs the generated export to ignored public frontend metadata; after re-exporting while the app runs, use `npm.cmd --prefix apps/web run contracts:sync` and Retry verification. No addresses or ABIs are manually copied into page components.
+For live workflows, start a persistent node on http://127.0.0.1:8545, deploy Phase2D, and export with `TRUSTLAYER_EXPORT_EPHEMERAL=false` using the exact [Phase 3C setup and controlled token-provisioning commands](docs/PHASE3C.md). The checked-in ephemeral verification manifest is intentionally rejected. Dev/build syncs the generated export to ignored public frontend metadata; after re-exporting while the app runs, use `npm.cmd --prefix apps/web run contracts:sync` and Retry verification. No addresses or ABIs are manually copied into page components.
 
 ```powershell
 npm.cmd run web:lint
@@ -138,7 +138,7 @@ npm.cmd run web:build
 npm.cmd run web:start
 ```
 
-Run `npm.cmd --prefix apps/web run test:unit` for metadata, token precision and transaction-state tests. For browser tests, stop any server on port 3000, build first, then use `npm.cmd --prefix apps/web exec -- playwright install chromium` followed by `npm.cmd run web:test`. To use installed Chrome instead, set `$env:PLAYWRIGHT_CHANNEL='chrome'` before running the tests. Tests own and stop their production server. Frontend dependencies and lockfile live only in `apps/web`; root `compile`, `test`, and `typecheck` still verify the blockchain project. See [Phase 3A](docs/PHASE3A.md) for the design foundation and [Phase 3B](docs/PHASE3B.md) for current results, wallet setup, manual MetaMask steps and limitations. Browser wallet tests use deterministic mocked providers; actual MetaMask interaction is a separate manual check.
+Run `npm.cmd --prefix apps/web run test:unit` for metadata, precision, workflow guards and transaction-state tests. For browser tests, stop any server on port 3000, build first, then use `npm.cmd --prefix apps/web exec -- playwright install chromium` followed by `npm.cmd run web:test`. To use installed Chrome instead, set `$env:PLAYWRIGHT_CHANNEL='chrome'` before running the tests. Tests own and stop their production server. Frontend dependencies and lockfile live only in `apps/web`; root `compile`, `test`, and `typecheck` still verify the blockchain project. Compile first on a clean checkout to generate the integration script's artifact type declarations. `npx.cmd hardhat run apps/web/scripts/verify-escrow-workflow.ts` exercises the frontend adapters against a fresh in-process production-contract deployment without modifying your running node. See [Phase 3C](docs/PHASE3C.md) for results, manual verification and limitations, and [Phase 3B](docs/PHASE3B.md) for wallet setup. Browser wallet tests use deterministic mocked providers; actual MetaMask interaction is a separate manual check.
 
 ## Limits and security
 

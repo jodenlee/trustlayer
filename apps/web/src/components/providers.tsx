@@ -11,6 +11,7 @@ import {
 import { CheckCircle2, X } from "lucide-react";
 import { BlockchainProvider } from "./blockchain-provider";
 import { WalletDialog } from "./wallet";
+import { WorkflowProvider } from "./workflow-provider";
 
 interface PreviewContext {
   sample: boolean;
@@ -31,7 +32,9 @@ export function usePreview() {
 export function Providers({ children }: { children: ReactNode }) {
   return (
     <BlockchainProvider>
-      <PreviewProvider>{children}</PreviewProvider>
+      <WorkflowProvider>
+        <PreviewProvider>{children}</PreviewProvider>
+      </WorkflowProvider>
     </BlockchainProvider>
   );
 }

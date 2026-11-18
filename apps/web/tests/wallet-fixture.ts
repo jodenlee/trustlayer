@@ -15,6 +15,7 @@ declare global {
       chain: (chain: number) => void;
       disconnect: () => void;
       calls: string[];
+      confirmSigning: () => void;
     };
   }
 }
@@ -27,6 +28,8 @@ export async function installWallet(
     unknownNetwork?: boolean;
     switchRejected?: boolean;
     walletWrongBlock?: boolean;
+    forwardRpc?: boolean;
+    deferSigning?: boolean;
   } = {},
 ) {
   const manifest = fixtureManifest();
@@ -37,6 +40,7 @@ export async function installWallet(
       let authorized = false;
       let known = !options.unknownNetwork;
       const calls: string[] = [];
+      let confirmSigning: (() => void) | undefined;
       const listeners = new Map<string, Set<(value: unknown) => void>>();
       const emit = (event: string, value: unknown) =>
         listeners.get(event)?.forEach((listener) => listener(value));
@@ -100,6 +104,25 @@ export async function installWallet(
               ? { ...block, hash: `0x${"f".repeat(64)}` }
               : block;
           if (method === "eth_getCode") return code;
+          if (options.forwardRpc) {
+            if (method === "eth_sendTransaction" && options.deferSigning)
+              await new Promise<void>((resolve) => {
+                confirmSigning = resolve;
+              });
+            const response = await fetch("http://127.0.0.1:8545", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                jsonrpc: "2.0",
+                id: 1,
+                method,
+                params: params ?? [],
+              }),
+            });
+            const data = await response.json();
+            if (data.error) throw data.error;
+            return data.result;
+          }
           throw {
             code: -32601,
             message: `Unsupported fixture method ${method}`,
@@ -111,6 +134,7 @@ export async function installWallet(
         configurable: true,
       });
       window.__testWallet = {
+        confirmSigning: () => confirmSigning?.(),
         calls,
         account(address) {
           accounts = [address];

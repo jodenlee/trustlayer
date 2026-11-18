@@ -19,6 +19,7 @@ import { usePreview } from "./providers";
 import { Button } from "./ui";
 import { Dialog } from "./dialog";
 import { WalletControl, WalletNetworkStatus } from "./wallet";
+import { useConnection } from "wagmi";
 
 export function Logo() {
   return (
@@ -85,7 +86,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         </Link>
         <div className="local-badge">
           <span className="status-dot" />
-          Local development<span>Phase 3B</span>
+          Local development<span>Phase 3C</span>
         </div>
       </div>
     </>
@@ -95,6 +96,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobile, setMobile] = useState(false);
   const { sample, setSample, name } = usePreview();
   const pathname = usePathname();
+  const { isConnected } = useConnection();
+  const liveWorkspace =
+    isConnected &&
+    /^\/(dashboard|projects|transactions)(\/|$)/.test(pathname) &&
+    !pathname.startsWith("/projects/tl-");
   const section =
     navigation.find((item) => pathname.startsWith(item.href))?.title ??
     "Workspace";
@@ -144,21 +150,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div>
               <FlaskConical size={16} aria-hidden="true" />
               <p>
-                <strong>Interface preview</strong>
+                <strong>
+                  {liveWorkspace ? "On-chain workspace" : "Interface preview"}
+                </strong>
                 <span>
                   {" "}
-                  · {sample ? "Fictional sample data" : "Empty workspace"}.
-                  Project actions are disabled; live wallet data is labeled
-                  separately.
+                  {liveWorkspace
+                    ? " · Verified account data only. Metadata and client transaction tracking are session-only."
+                    : ` · ${sample ? "Fictional sample data" : "Empty workspace"}. Live wallet data is labeled separately; sample actions stay disabled.`}
                 </span>
               </p>
             </div>
-            <button
-              className="preview-toggle"
-              onClick={() => setSample(!sample)}
-            >
-              {sample ? "Show empty state" : "Show sample data"}
-            </button>
+            {!liveWorkspace && (
+              <button
+                className="preview-toggle"
+                onClick={() => setSample(!sample)}
+              >
+                {sample ? "Show empty state" : "Show sample data"}
+              </button>
+            )}
           </div>
           {children}
           <footer className="app-footer">

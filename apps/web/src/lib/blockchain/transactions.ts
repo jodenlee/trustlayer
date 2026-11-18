@@ -26,6 +26,7 @@ export interface TransactionLifecycle {
   message?: string;
   errorKind?: IntegrationErrorKind;
   refreshWarning?: string;
+  replacementReason?: "repriced" | "replaced" | "cancelled";
 }
 export interface ReceiptSummary {
   status: "success" | "reverted";
@@ -45,8 +46,9 @@ export interface TransactionDependencies<Context> {
   ) => Promise<ReceiptSummary>;
   refresh: () => Promise<unknown>;
   publish: (state: TransactionLifecycle) => void;
+  observe?: (state: TransactionLifecycle) => void;
 }
-/** Generic infrastructure only. No production page invokes this controller in Phase 3B. */
+/** UI publication is account-scoped; an optional session observer keeps submitted hashes across navigation. */
 export function createTransactionController<Context>(
   dependencies: TransactionDependencies<Context>,
 ) {
@@ -70,6 +72,7 @@ export function createTransactionController<Context>(
       const run = ++generation;
       const current = () => generation === run && dependencies.isCurrent();
       const publish = (state: TransactionLifecycle) => {
+        dependencies.observe?.(state);
         if (current()) dependencies.publish(state);
       };
       let hash: Hash | undefined;
@@ -78,7 +81,14 @@ export function createTransactionController<Context>(
       try {
         publish({ phase: "validating" });
         const context = await dependencies.validate();
-        if (!current()) return;
+        if (!current()) {
+          dependencies.observe?.({
+            phase: "failed",
+            message:
+              "The page or account changed before a wallet request was sent.",
+          });
+          return;
+        }
         publish({ phase: "awaiting-signature" });
         const candidate = await submit(context);
         if (!/^0x[\da-fA-F]{64}$/.test(candidate))
@@ -88,15 +98,18 @@ export function createTransactionController<Context>(
           );
         hash = candidate;
         submittedHash = hash;
-        if (!current()) return;
         publish({ phase: "submitted", hash, submittedHash });
         publish({ phase: "confirming", hash, submittedHash });
         const receipt = await dependencies.wait(hash, (replacement) => {
           replacementReason = replacement.reason;
           hash = replacement.hash;
-          publish({ phase: "confirming", hash, submittedHash });
+          publish({
+            phase: "confirming",
+            hash,
+            submittedHash,
+            replacementReason,
+          });
         });
-        if (!current()) return;
         if (receipt.transactionHash.toLowerCase() !== hash.toLowerCase())
           throw new IntegrationError(
             "rpc",
@@ -135,6 +148,7 @@ export function createTransactionController<Context>(
           submittedHash,
           blockNumber: receipt.blockNumber,
         });
+        if (!current()) return;
         try {
           await dependencies.refresh();
         } catch {
@@ -147,6 +161,7 @@ export function createTransactionController<Context>(
               "Transaction confirmed, but refreshing reads failed. Retry the reads separately.",
           });
         }
+        return current() ? receipt : undefined;
       } catch (error) {
         const failure = describeError(error);
         publish({
@@ -160,6 +175,7 @@ export function createTransactionController<Context>(
           hash,
           submittedHash,
           errorKind: failure.kind,
+          replacementReason,
           message: hash
             ? "Transaction was submitted, but confirmation could not be established. Check its receipt before retrying; do not assume failure."
             : failure.message,

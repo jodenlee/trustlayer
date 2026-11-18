@@ -193,7 +193,7 @@ export function ProjectDetail({ project }: { project: Project }) {
                     Accept project
                   </Button>
                   <p className="small text-muted mt-2">
-                    The freelancer has 7 days after funding to accept.
+                    The freelancer has 7 days after project creation to accept.
                   </p>
                 </>
               )}

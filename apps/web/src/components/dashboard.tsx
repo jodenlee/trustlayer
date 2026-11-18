@@ -23,9 +23,13 @@ import { StatCard } from "./stats";
 import { Money } from "./money";
 import { usePreview } from "./providers";
 import { LiveWalletCard } from "./live-wallet";
+import { useConnection } from "wagmi";
+import { ChainProjects } from "./chain-projects";
 
 export function Dashboard() {
   const { sample, name } = usePreview();
+  const { isConnected } = useConnection();
+  if (isConnected) return <ChainProjects dashboard />;
   const active = projects.filter((p) => p.state === "Active");
   return (
     <>

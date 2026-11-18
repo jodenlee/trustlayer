@@ -5,10 +5,13 @@ import { projects } from "@/lib/preview-data";
 import { Button, ButtonLink, Card, EmptyState, Input, PageHeading } from "./ui";
 import { ProjectTable } from "./project-table";
 import { usePreview } from "./providers";
+import { useConnection } from "wagmi";
+import { ChainProjects } from "./chain-projects";
 export function ProjectList() {
   const [filter, setFilter] = useState("All projects");
   const [search, setSearch] = useState("");
   const { sample } = usePreview();
+  const { isConnected } = useConnection();
   const rows = sample
     ? projects.filter(
         (p) =>
@@ -18,6 +21,7 @@ export function ProjectList() {
             .includes(search.toLowerCase()),
       )
     : [];
+  if (isConnected) return <ChainProjects />;
   return (
     <>
       <PageHeading

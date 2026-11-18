@@ -14,11 +14,13 @@ import type { TransactionView } from "@/lib/models";
 import { Money } from "./money";
 import { deadlineLabel } from "@/lib/format";
 import { useConnection } from "wagmi";
+import { WalletTransactions } from "./chain-history";
 /** Intentionally empty: Phase 3A never manufactures transaction hashes or confirmations. */
 const transactions: TransactionView[] = [];
 export function Transactions() {
   const { openWallet } = usePreview();
   const { isConnected } = useConnection();
+  if (isConnected) return <WalletTransactions />;
   return (
     <>
       <PageHeading

@@ -184,7 +184,7 @@ for (const [name, options] of [
     ).toContainText("Token read failed");
     await expect(page.getByTestId("live-balance")).toHaveText("—");
   });
-test("connected wallet leaves project samples labeled and transaction history empty", async ({
+test("connected wallet replaces samples with real project reads and empty history", async ({
   page,
 }, testInfo) => {
   await installWallet(page);
@@ -193,7 +193,13 @@ test("connected wallet leaves project samples labeled and transaction history em
   await connectWallet(page);
   await page.keyboard.press("Escape");
   await expect(
+    page.getByText("On-chain workspace", { exact: true }),
+  ).toBeVisible();
+  await expect(
     page.getByText("Fictional sample data", { exact: false }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "No on-chain projects yet" }),
   ).toBeVisible();
   await expect(page.getByTestId("live-balance")).toContainText("123.456789");
   await expect(
@@ -217,9 +223,10 @@ test("connected wallet leaves project samples labeled and transaction history em
     .getByRole("link", { name: "Transactions", exact: true })
     .click();
   await expect(
-    page.getByText(
-      /Wallet connected; transaction history is not integrated yet/,
-    ),
+    page.getByRole("heading", { name: "No transaction requests this session" }),
   ).toBeVisible();
   await expect(page.locator("table")).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "No matching events in these blocks" }),
+  ).toBeVisible();
 });

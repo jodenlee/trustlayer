@@ -28,3 +28,8 @@ export function makeWalletConfig() {
     },
   });
 }
+declare module "wagmi" {
+  interface Register {
+    config: ReturnType<typeof makeWalletConfig>;
+  }
+}

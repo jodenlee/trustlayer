@@ -1,6 +1,6 @@
 "use client";
 import type { TransactionLifecycle } from "@/lib/blockchain/transactions";
-/** Reusable feedback for future flows. Not a demo transaction button. */
+/** Actual signing and receipt state shared by escrow workflows. */
 export function TransactionFeedback({
   state,
 }: {
@@ -10,6 +10,24 @@ export function TransactionFeedback({
   return (
     <div role="status" aria-live="polite" className="transaction-feedback">
       <strong>{state.phase.replaceAll("-", " ")}</strong>
+      {state.phase === "validating" && (
+        <p className="small mt-2">
+          Checking the wallet, local network and deployed contracts…
+        </p>
+      )}
+      {state.phase === "awaiting-signature" && (
+        <p className="small mt-2">
+          Preparing the transaction for MetaMask or your connected wallet.
+          Confirm it when prompted; if no popup appears, open your wallet
+          extension.
+        </p>
+      )}
+      {state.phase === "confirming" && (
+        <p className="small mt-2">
+          Transaction submitted. Waiting for its on-chain receipt; do not submit
+          it again.
+        </p>
+      )}
       {state.hash && (
         <p className="wallet-address">
           <span className="small text-muted">Transaction hash </span>

@@ -26,6 +26,12 @@ export function describeError(error: unknown): {
   while (current && typeof current === "object" && !visited.has(current)) {
     visited.add(current);
     const item = current as { code?: number; name?: string; cause?: unknown };
+    if (item.name?.includes("InsufficientFunds"))
+      return {
+        kind: "rpc",
+        message:
+          "Insufficient local ETH for gas. Provision local development ETH outside this app, then retry.",
+      };
     if (item.code === 4001 || item.name === "UserRejectedRequestError")
       return {
         kind: "rejected",

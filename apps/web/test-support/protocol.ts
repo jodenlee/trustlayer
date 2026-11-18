@@ -58,6 +58,7 @@ export function rpcFixture(
     return `0x${BigInt(manifest.verifiedBlock.number).toString(16)}`;
   if (method === "eth_getBlockByNumber") return blockFixture(manifest);
   if (method === "eth_getCode") return code;
+  if (method === "eth_getLogs") return [];
   if (method === "eth_call") {
     const call = params[0] as { to: string; data: `0x${string}` };
     const name = CONTRACT_NAMES.find(
