@@ -22,6 +22,7 @@ import {
 } from "./ui";
 import { Money } from "./money";
 import { usePreview } from "./providers";
+import { useWalletCases } from "@/lib/blockchain/hooks/use-arbitration";
 
 export function HashCopy({ hash }: { hash: `0x${string}` }) {
   const { toast } = usePreview();
@@ -43,11 +44,13 @@ export function HashCopy({ hash }: { hash: `0x${string}` }) {
 export function ChainHistory({
   projectIds,
   detail = false,
+  disputeIds = [],
 }: {
   projectIds: bigint[];
   detail?: boolean;
+  disputeIds?: bigint[];
 }) {
-  const history = useProjectHistory(projectIds);
+  const history = useProjectHistory(projectIds, disputeIds);
   return (
     <Card>
       <CardHeading
@@ -56,7 +59,7 @@ export function ChainHistory({
             ? "On-chain project events & payouts"
             : "On-chain event history"
         }
-        description="Confirmed escrow events and wallet-to-escrow token approvals; bounded pages of 200 blocks."
+        description="Confirmed protocol events and wallet approvals; bounded pages of 200 blocks. Related-case events are distinct from this wallet's actions."
       />
       {history.error ? (
         <EmptyState
@@ -90,6 +93,19 @@ export function ChainHistory({
                   <strong>{e.kind}</strong>
                   <p className="project-subtitle">
                     On-chain event · Confirmed
+                    {` · ${e.activity ?? "Related project event"}`}
+                    {e.disputeId !== undefined && (
+                      <>
+                        {" "}
+                        ·{" "}
+                        <Link
+                          className="text-link"
+                          href={`/disputes/${e.disputeId}`}
+                        >
+                          Dispute #{e.disputeId.toString()}
+                        </Link>
+                      </>
+                    )}
                     {e.projectId !== undefined && (
                       <>
                         {" "}
@@ -219,6 +235,18 @@ export function SessionHistory({
                   <p className="project-subtitle">
                     Session request · {a.state.phase}
                     {a.projectId !== undefined && ` · Project #${a.projectId}`}
+                    {a.disputeId !== undefined && (
+                      <>
+                        {" "}
+                        ·{" "}
+                        <Link
+                          className="text-link"
+                          href={`/disputes/${a.disputeId}`}
+                        >
+                          Dispute #{a.disputeId.toString()}
+                        </Link>
+                      </>
+                    )}
                     {a.milestoneIndex !== undefined &&
                       ` · Milestone ${a.milestoneIndex + 1}`}
                   </p>
@@ -334,6 +362,7 @@ export function SessionHistory({
 }
 export function WalletTransactions() {
   const projects = useWalletProjects();
+  const cases = useWalletCases();
   return (
     <>
       <PageHeading
@@ -354,7 +383,32 @@ export function WalletTransactions() {
             </Button>
           </div>
         )}
-        <ChainHistory projectIds={projects.projects.map((p) => p.id)} />
+        {cases.error && (
+          <p role="alert" className="form-error">
+            Case discovery unavailable; related case history may be incomplete.
+          </p>
+        )}
+        {cases.hasNextPage && (
+          <div className="info-note">
+            Case history is limited to loaded cases.{" "}
+            <Button
+              variant="secondary"
+              disabled={cases.isFetching || !cases.deployment.ready}
+              onClick={() => void cases.fetchNextPage()}
+            >
+              Load earlier wallet disputes
+            </Button>
+          </div>
+        )}
+        <ChainHistory
+          projectIds={[
+            ...new Set([
+              ...projects.projects.map((p) => p.id),
+              ...cases.cases.map((c) => c.dispute.projectId),
+            ]),
+          ]}
+          disputeIds={cases.cases.map((c) => c.id)}
+        />
       </div>
     </>
   );

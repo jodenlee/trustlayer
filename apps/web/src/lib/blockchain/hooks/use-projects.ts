@@ -93,20 +93,23 @@ export function useChainProject(id: bigint) {
     view: deployment.ready && !query.isError ? query.data : undefined,
   };
 }
-export function useProjectHistory(projectIds: readonly bigint[]) {
+export function useProjectHistory(
+  projectIds: readonly bigint[],
+  disputeIds: readonly bigint[] = [],
+) {
   const deployment = useVerifiedDeployment();
   const config = deployment.data;
   const start = useQuery({
     queryKey: [
       "trustlayer",
-      "deployment-start",
+      "protocol-deployment-start",
       config && deploymentScope(config.manifest),
     ],
     enabled: deployment.ready && !!config,
     queryFn: () =>
       findDeploymentBlock(
         localClient,
-        config!.contracts.TrustEscrow.address,
+        config!.contracts.MockUSD.address,
         BigInt(config!.manifest.verifiedBlock.number),
       ),
     staleTime: Infinity,
@@ -119,6 +122,7 @@ export function useProjectHistory(projectIds: readonly bigint[]) {
       deployment.chainId,
       config && deploymentScope(config.manifest),
       projectIds.map(String).sort().join(","),
+      disputeIds.map(String).sort().join(","),
     ],
     initialPageParam: undefined as bigint | undefined,
     enabled: deployment.ready && start.isSuccess && !!config,
@@ -130,6 +134,7 @@ export function useProjectHistory(projectIds: readonly bigint[]) {
         projectIds,
         start.data!,
         pageParam,
+        disputeIds,
       ),
     getNextPageParam: (page) => page.next,
     staleTime: 10_000,

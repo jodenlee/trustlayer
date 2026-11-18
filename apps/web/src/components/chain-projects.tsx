@@ -34,6 +34,7 @@ import { StatCard } from "./stats";
 import { LiveWalletCard } from "./live-wallet";
 import { describeError } from "@/lib/blockchain/errors";
 import { SessionHistory } from "./chain-history";
+import { ChainDisputes } from "./chain-disputes";
 
 export function ChainProjectTable({
   projects,
@@ -173,6 +174,7 @@ export function ChainProjects({ dashboard = false }: { dashboard?: boolean }) {
       )}
       {dashboard && (
         <div className="mt-6">
+          <ChainDisputes dashboard />
           <SessionHistory confirmedOnly />
         </div>
       )}

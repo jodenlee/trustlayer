@@ -8,7 +8,13 @@ import { Card, DataTable, EmptyState, PageHeading, StatusBadge } from "./ui";
 import { StatCard } from "./stats";
 import { Money } from "./money";
 import { usePreview } from "./providers";
+import { useConnection } from "wagmi";
+import { ChainDisputes } from "./chain-disputes";
 export function DisputeList() {
+  const { isConnected } = useConnection();
+  return isConnected ? <ChainDisputes /> : <PreviewDisputeList />;
+}
+function PreviewDisputeList() {
   const { sample } = usePreview();
   const [filter, setFilter] = useState("All cases");
   const rows = sample

@@ -10,6 +10,7 @@ export function deploymentScope(manifest: LocalDeployment) {
 export interface AttemptDetails {
   kind: string;
   projectId?: bigint;
+  disputeId?: bigint;
   milestoneIndex?: number;
   amount?: bigint;
   expectedScope?: string;
@@ -47,6 +48,7 @@ export function createSessionStore() {
   let nextId = 0;
   const attempts: SessionAttempt[] = [];
   const metadata = new Map<string, SessionMetadata>();
+  const inputs = new Map<string, string>();
   const notify = () => {
     version++;
     listeners.forEach((fn) => fn());
@@ -59,6 +61,11 @@ export function createSessionStore() {
       };
     },
     snapshot: () => version,
+    input: (key: string, fallback = "") => inputs.get(key) ?? fallback,
+    setInput(key: string, value: string) {
+      inputs.set(key, value);
+      notify();
+    },
     attempts: () => attempts,
     busy: (scope: string, actor: Address) =>
       attempts.some(

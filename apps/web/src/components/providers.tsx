@@ -12,6 +12,7 @@ import { CheckCircle2, X } from "lucide-react";
 import { BlockchainProvider } from "./blockchain-provider";
 import { WalletDialog } from "./wallet";
 import { WorkflowProvider } from "./workflow-provider";
+import { ReviewedActionProvider } from "./reviewed-action";
 
 interface PreviewContext {
   sample: boolean;
@@ -64,7 +65,7 @@ function PreviewProvider({ children }: { children: ReactNode }) {
         toast,
       }}
     >
-      {children}
+      <ReviewedActionProvider>{children}</ReviewedActionProvider>
       <WalletDialog open={wallet} onClose={() => setWallet(false)} />
       <div
         className="toast-region"

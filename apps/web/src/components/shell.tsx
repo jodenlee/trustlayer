@@ -86,7 +86,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         </Link>
         <div className="local-badge">
           <span className="status-dot" />
-          Local development<span>Phase 3C</span>
+          Local development<span>Phase 3D</span>
         </div>
       </div>
     </>
@@ -99,8 +99,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { isConnected } = useConnection();
   const liveWorkspace =
     isConnected &&
-    /^\/(dashboard|projects|transactions)(\/|$)/.test(pathname) &&
-    !pathname.startsWith("/projects/tl-");
+    /^\/(dashboard|projects|transactions|disputes|juror)(\/|$)/.test(
+      pathname,
+    ) &&
+    !pathname.startsWith("/projects/tl-") &&
+    !pathname.startsWith("/disputes/dp-");
   const section =
     navigation.find((item) => pathname.startsWith(item.href))?.title ??
     "Workspace";

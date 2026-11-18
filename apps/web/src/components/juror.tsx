@@ -12,7 +12,13 @@ import {
 import { StatCard } from "./stats";
 import { Money } from "./money";
 import { usePreview } from "./providers";
+import { useConnection } from "wagmi";
+import { ChainJuror } from "./chain-juror";
 export function JurorWorkspace() {
+  const { isConnected } = useConnection();
+  return isConnected ? <ChainJuror /> : <PreviewJurorWorkspace />;
+}
+function PreviewJurorWorkspace() {
   const { sample, openWallet } = usePreview();
   return (
     <>

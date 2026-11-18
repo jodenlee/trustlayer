@@ -40,6 +40,19 @@ interface FakeProject {
   state: number;
   milestones: FakeMilestone[];
 }
+export interface FixtureContractCall {
+  name: keyof typeof abis;
+  fn: string;
+  args: readonly unknown[];
+  actor: Address;
+  send: boolean;
+  now: bigint;
+  emit: (
+    event: string,
+    values: Record<string, unknown>,
+    contract?: keyof typeof abis,
+  ) => void;
+}
 /** Stateful browser fixture only; financial correctness is additionally checked on a real EVM. */
 export function escrowRpc(
   options: {
@@ -59,7 +72,13 @@ export function escrowRpc(
     [accountA, options.balance ?? 1_000_000_000n],
     [accountB, 0n],
   ]);
-  let allowance = options.allowance ?? 0n;
+  const allowances = new Map<string, bigint>();
+  const allowanceKey = (owner: string, spender: string) =>
+    `${owner.toLowerCase()}:${spender.toLowerCase()}`;
+  allowances.set(
+    allowanceKey(accountA, manifest.contracts.TrustEscrow.address),
+    options.allowance ?? 0n,
+  );
   let treasury = 0n;
   const receipts = new Map<Hex, unknown>();
   const transactions = new Map<Hex, Record<string, unknown>>();
@@ -93,6 +112,9 @@ export function escrowRpc(
   let rejectNext = false;
   let revertNext = false;
   let rpcFailure: string | undefined;
+  let contractHook:
+    | ((request: FixtureContractCall) => { result: unknown } | undefined)
+    | undefined;
   function emit(
     abi: Abi,
     name: string,
@@ -138,12 +160,42 @@ export function escrowRpc(
     const decoded = decodeFunctionData({ abi, data });
     const args = decoded.args ?? [];
     const fn = decoded.functionName;
+    const extension = contractHook?.({
+      name,
+      fn,
+      args,
+      actor,
+      send,
+      now,
+      emit: (event, values, contract = name) =>
+        emit(
+          abis[contract],
+          event,
+          values,
+          manifest.contracts[contract].address,
+          tx,
+          txLogs,
+        ),
+    });
+    if (extension) {
+      const item = getAbiItem({ abi, name: fn });
+      return item?.type === "function" && item.outputs.length
+        ? encodeFunctionResult({
+            abi,
+            functionName: fn,
+            result: extension.result,
+          })
+        : "0x";
+    }
     let value: unknown = 0n;
     const p = projects[Number(args[0] ?? 0)];
     if (fn === "nextProjectId") value = BigInt(projects.length);
     else if (fn === "balanceOf")
       value = balances.get(String(args[0]).toLowerCase()) ?? 0n;
-    else if (fn === "allowance") value = allowance;
+    else if (fn === "allowance")
+      value =
+        allowances.get(allowanceKey(String(args[0]), String(args[1]))) ?? 0n;
+    else if (fn === "getMilestoneDispute") value = [false, 0n];
     else if (fn === "decimals") value = 6;
     else if (fn === "symbol") value = "mUSD";
     else if (fn === "owner") value = accountA;
@@ -215,7 +267,8 @@ export function escrowRpc(
     } else if (fn === "approve") {
       value = true;
       if (send) {
-        allowance = args[1] as bigint;
+        const allowance = args[1] as bigint;
+        allowances.set(allowanceKey(actor, String(args[0])), allowance);
         emit(
           abi,
           "Approval",
@@ -232,7 +285,8 @@ export function escrowRpc(
         actor.toLowerCase(),
         balances.get(actor.toLowerCase())! - p.total,
       );
-      allowance -= p.total;
+      const key = allowanceKey(actor, manifest.contracts.TrustEscrow.address);
+      allowances.set(key, (allowances.get(key) ?? 0n) - p.total);
       emit(
         abi,
         "ProjectFunded",
@@ -346,12 +400,14 @@ export function escrowRpc(
       block++;
       now++;
       const txLogs: Record<string, unknown>[] = [];
+      const target = (Object.keys(abis) as (keyof typeof abis)[]).find(
+        (name) =>
+          manifest.contracts[name].address.toLowerCase() ===
+          request.to.toLowerCase(),
+      );
+      if (!target) throw new Error("Unknown fixture transaction target");
       const fn = decodeFunctionData({
-        abi:
-          request.to.toLowerCase() ===
-          manifest.contracts.MockUSD.address.toLowerCase()
-            ? abis.MockUSD
-            : abis.TrustEscrow,
+        abi: abis[target],
         data: request.data,
       }).functionName;
       writes.push(fn);
@@ -432,6 +488,13 @@ export function escrowRpc(
     manifest,
     projects,
     writes,
+    balances,
+    allowances,
+    allowanceKey,
+    time: () => now,
+    onContract: (hook: NonNullable<typeof contractHook>) => {
+      contractHook = hook;
+    },
     advance: (timestamp: bigint) => {
       now = timestamp;
       block++;

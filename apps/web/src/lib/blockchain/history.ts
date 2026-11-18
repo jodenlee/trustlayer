@@ -1,4 +1,9 @@
-import { MockUSDAbi, TrustEscrowAbi } from "@trustlayer/contracts";
+import {
+  MockUSDAbi,
+  TrustEscrowAbi,
+  DisputeArbitrationAbi,
+  JurorRegistryAbi,
+} from "@trustlayer/contracts";
 import { decodeEventLog, type Address, type Hash } from "viem";
 import type { ContractClients } from "./types";
 import type { ReadClient } from "./projects";
@@ -10,6 +15,8 @@ export interface HistoryEntry {
   hash: Hash;
   blockNumber: bigint;
   projectId?: bigint;
+  disputeId?: bigint;
+  activity?: "Wallet activity" | "Related case event" | "Related project event";
   milestoneIndex?: number;
   amount?: bigint;
   freelancerGross?: bigint;
@@ -44,6 +51,7 @@ export async function readHistoryPage(
   projectIds: readonly bigint[],
   start: bigint,
   before?: bigint,
+  disputeIds: readonly bigint[] = [],
 ) {
   const latest =
     before ?? (await client.getBlock({ blockTag: "latest" })).number;
@@ -58,26 +66,44 @@ export async function readHistoryPage(
       fromBlock: start,
       toBlock: latest,
     };
-  const [escrowLogs, approvals] = await Promise.all([
-    client.getLogs({
-      address: contracts.TrustEscrow.address,
-      fromBlock,
-      toBlock: latest,
-    }),
-    client.getContractEvents({
-      ...contracts.MockUSD,
-      eventName: "Approval",
-      args: { owner: account, spender: contracts.TrustEscrow.address },
-      fromBlock,
-      toBlock: latest,
-      strict: true,
-    }),
-  ]);
-  if (escrowLogs.length + approvals.length > 2000)
+  const [escrowLogs, approvals, arbitrationLogs, registryLogs] =
+    await Promise.all([
+      client.getLogs({
+        address: contracts.TrustEscrow.address,
+        fromBlock,
+        toBlock: latest,
+      }),
+      client.getContractEvents({
+        ...contracts.MockUSD,
+        eventName: "Approval",
+        args: { owner: account },
+        fromBlock,
+        toBlock: latest,
+        strict: true,
+      }),
+      client.getLogs({
+        address: contracts.DisputeArbitration.address,
+        fromBlock,
+        toBlock: latest,
+      }),
+      client.getLogs({
+        address: contracts.JurorRegistry.address,
+        fromBlock,
+        toBlock: latest,
+      }),
+    ]);
+  if (
+    escrowLogs.length +
+      approvals.length +
+      arbitrationLogs.length +
+      registryLogs.length >
+    2000
+  )
     throw new Error(
       "This 200-block history page is too dense for the local UI. Use a block explorer or a future event indexer; no partial page was presented as complete.",
     );
   const ids = new Set(projectIds.map(String));
+  const cases = new Set(disputeIds.map(String));
   const entries: HistoryEntry[] = [];
   for (const log of escrowLogs) {
     try {
@@ -133,8 +159,118 @@ export async function readHistoryPage(
       /* Unrelated escrow/configuration events are not transaction history rows. */
     }
   }
+  for (const log of arbitrationLogs) {
+    if (log.blockNumber === null || !log.transactionHash) continue;
+    try {
+      const event = decodeEventLog({
+        abi: DisputeArbitrationAbi,
+        data: log.data,
+        topics: log.topics,
+      });
+      if (
+        !("disputeId" in event.args) ||
+        !cases.has(String(event.args.disputeId))
+      )
+        continue;
+      const actor =
+        "juror" in event.args
+          ? event.args.juror
+          : "opener" in event.args
+            ? event.args.opener
+            : "responder" in event.args
+              ? event.args.responder
+              : "payer" in event.args
+                ? event.args.payer
+                : undefined;
+      const names: Record<string, string> = {
+        DisputeOpened: "Dispute opened",
+        DisputeFeeCollected: "Dispute opening fee paid",
+        DisputeResponded: "Response hash recorded",
+        VoteCast: "Public juror vote",
+        DisputeFinalized: "Dispute finalized",
+        JurorRewardClaimed: "Juror reward claimed",
+        JurorRewardsReserved: "Juror rewards reserved",
+        ProtocolFeeDeposited: "Dispute protocol fee deposited",
+        VerdictReached: "On-chain verdict reached",
+      };
+      if (!names[event.eventName]) continue;
+      entries.push({
+        id: `${log.transactionHash}:${log.logIndex}`,
+        hash: log.transactionHash,
+        blockNumber: log.blockNumber,
+        disputeId: event.args.disputeId,
+        projectId: "projectId" in event.args ? event.args.projectId : undefined,
+        milestoneIndex:
+          "milestoneIndex" in event.args
+            ? Number(event.args.milestoneIndex)
+            : undefined,
+        amount:
+          "amount" in event.args
+            ? event.args.amount
+            : "milestoneAmount" in event.args
+              ? event.args.milestoneAmount
+              : undefined,
+        kind: names[event.eventName],
+        source: "On-chain event",
+        activity:
+          actor?.toLowerCase() === account.toLowerCase()
+            ? "Wallet activity"
+            : "Related case event",
+      });
+    } catch {
+      /* Configuration or unknown events are not activity rows. */
+    }
+  }
+  for (const log of registryLogs) {
+    if (log.blockNumber === null || !log.transactionHash) continue;
+    try {
+      const event = decodeEventLog({
+        abi: JurorRegistryAbi,
+        data: log.data,
+        topics: log.topics,
+      });
+      if (
+        !("juror" in event.args) ||
+        event.args.juror.toLowerCase() !== account.toLowerCase()
+      )
+        continue;
+      const names: Record<string, string> = {
+        JurorRegistered: "Juror registered",
+        StakeDeposited: "Stake deposited",
+        StakeWithdrawn: "Stake withdrawn",
+        JurorAssigned: "Juror assigned",
+        StakeLocked: "Case stake locked",
+        StakeUnlocked: "Case stake unlocked",
+      };
+      if (!names[event.eventName]) continue;
+      entries.push({
+        id: `${log.transactionHash}:${log.logIndex}`,
+        hash: log.transactionHash,
+        blockNumber: log.blockNumber,
+        kind: names[event.eventName],
+        amount: "amount" in event.args ? event.args.amount : undefined,
+        disputeId: "disputeId" in event.args ? event.args.disputeId : undefined,
+        source: "On-chain event",
+        activity: "Wallet activity",
+      });
+    } catch {
+      /* Unknown/configuration events are not personal registry activity. */
+    }
+  }
+  const spenders = new Set(
+    [
+      contracts.TrustEscrow.address,
+      contracts.DisputeArbitration.address,
+      contracts.JurorRegistry.address,
+    ].map((a) => a.toLowerCase()),
+  );
   for (const log of approvals)
-    if (log.transactionHash && log.blockNumber !== null)
+    if (
+      log.transactionHash &&
+      log.blockNumber !== null &&
+      log.args.spender &&
+      spenders.has(log.args.spender.toLowerCase())
+    )
       entries.push({
         id: `${log.transactionHash}:${log.logIndex}`,
         hash: log.transactionHash,
@@ -142,6 +278,7 @@ export async function readHistoryPage(
         kind: "mUSD allowance approved",
         amount: log.args.value,
         source: "On-chain event",
+        activity: "Wallet activity",
       });
   entries.sort((a, b) =>
     a.blockNumber > b.blockNumber

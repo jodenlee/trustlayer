@@ -36,6 +36,7 @@ import { Money } from "./money";
 import { LiveWalletCard } from "./live-wallet";
 import { TransactionFeedback } from "./transaction-feedback";
 import { ChainHistory } from "./chain-history";
+import { ProjectArbitration } from "./project-arbitration";
 
 const labels: Record<EscrowAction, string> = {
   approveToken: "Approve exact mUSD allowance",
@@ -354,8 +355,7 @@ export function ChainProjectDetail({ id }: { id: bigint }) {
                             <p className="info-note mt-4">
                               <LockKeyhole size={14} />
                               Frozen for arbitration. Approval, timeout release
-                              and submission are unavailable. Dispute actions
-                              are outside this phase.
+                              and submission are unavailable.
                             </p>
                           )}
                           {m.state === 3 && (
@@ -427,6 +427,12 @@ export function ChainProjectDetail({ id }: { id: bigint }) {
                                   </p>
                                 )}
                             </div>
+                          )}
+                          {m.state !== 0 && (
+                            <ProjectArbitration
+                              project={project}
+                              index={index}
+                            />
                           )}
                         </div>
                       </li>

@@ -28,7 +28,7 @@ export type ActionReadClient = Pick<
   | "getGasPrice"
   | "getBalance"
 >;
-async function sendChecked(
+export async function sendChecked(
   context: ProtocolWriteContext,
   request: ContractRequest,
   client: ActionReadClient = localClient,
