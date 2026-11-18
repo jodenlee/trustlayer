@@ -1,0 +1,14 @@
+node_modules/
+artifacts/
+cache/
+coverage/
+out/
+dist/
+.next/
+.env
+.env.local
+.env.*.local
+!.env.example
+*.log
+.DS_Store
+ignition/deployments/
