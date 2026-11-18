@@ -5,16 +5,14 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {ITrustEscrowArbitration} from "./interfaces/ITrustEscrowArbitration.sol";
 
-/// @title TrustLayer TrustEscrow — Phase 1 implementation
-/// @notice Production use is NOT intended; arbitration integration is not implemented yet.
+/// @title TrustLayer TrustEscrow — Phase 1 escrow with Phase 2A arbitration hooks
+/// @notice Production use is NOT intended; arbitration decision logic is not implemented yet.
 /// @dev Settlement design follows the team solution specification: 6-decimal mUSD,
 ///      1% fee on freelancer gross, 1–5 sequential milestones.
-contract TrustEscrow is ReentrancyGuard {
+contract TrustEscrow is ReentrancyGuard, ITrustEscrowArbitration {
     using SafeERC20 for IERC20;
-
-    enum ProjectState { UNFUNDED, FUNDED, ACTIVE, COMPLETED, CLOSED }
-    enum MilestoneState { PENDING, SUBMITTED, DISPUTED, SETTLED }
 
     struct Project {
         address client;
@@ -39,6 +37,7 @@ contract TrustEscrow is ReentrancyGuard {
 
     IERC20 public immutable paymentToken;
     address public immutable treasury;
+    address public immutable arbitrationConfigurator;
     uint256 public nextProjectId;
     uint256 public totalEscrowLiability;
     uint16 public constant SERVICE_FEE_BPS = 100; // 1%
@@ -48,6 +47,7 @@ contract TrustEscrow is ReentrancyGuard {
 
     mapping(uint256 => Project) public projects;
     mapping(uint256 => mapping(uint256 => Milestone)) public milestones;
+    address public arbitrationContract;
 
     event ProjectCreated(uint256 indexed projectId, address indexed client, address indexed freelancer, bytes32 metadataHash);
     event ProjectFunded(uint256 indexed projectId, uint256 amount);
@@ -55,6 +55,7 @@ contract TrustEscrow is ReentrancyGuard {
     event MilestoneSubmitted(uint256 indexed projectId, uint256 indexed index, bytes32 evidenceHash, uint64 reviewEnd);
     event MilestoneSettled(uint256 indexed projectId, uint256 indexed index, uint256 grossAmount, uint256 freelancerGross, uint256 freelancerNet, uint256 clientRefund, uint256 serviceFee);
     event ProjectClosed(uint256 indexed projectId);
+    event ArbitrationContractConfigured(address indexed arbitrationContract);
 
     error Unauthorized();
     error InvalidInput();
@@ -65,6 +66,51 @@ contract TrustEscrow is ReentrancyGuard {
         if (token_ == address(0) || treasury_ == address(0)) revert InvalidInput();
         paymentToken = IERC20(token_);
         treasury = treasury_;
+        arbitrationConfigurator = msg.sender;
+    }
+
+    modifier onlyArbitration() {
+        if (msg.sender != arbitrationContract) revert Unauthorized();
+        _;
+    }
+
+    /// @notice The deployer may configure arbitration once; there is no replacement or reset path.
+    /// @dev Deploy escrow first, then arbitration bound to this escrow, then configure it.
+    function setArbitrationContract(address arbitration_) external {
+        if (msg.sender != arbitrationConfigurator) revert Unauthorized();
+        if (arbitrationContract != address(0)) revert InvalidState();
+        if (arbitration_ == address(this) || arbitration_.code.length == 0) revert InvalidInput();
+        arbitrationContract = arbitration_;
+        emit ArbitrationContractConfigured(arbitration_);
+    }
+
+    function getDisputeContext(uint256 projectId, uint256 index) external view override returns (DisputeContext memory) {
+        Project storage p = projects[projectId];
+        if (projectId >= nextProjectId || index >= p.milestoneCount) revert InvalidInput();
+        Milestone storage m = milestones[projectId][index];
+        return DisputeContext(p.client, p.freelancer, m.amount, p.state, m.state, m.reviewEnd);
+    }
+
+    function freezeMilestone(uint256 projectId, uint256 index) external override onlyArbitration nonReentrant {
+        Project storage p = projects[projectId];
+        if (p.state != ProjectState.ACTIVE || index != p.currentMilestone) revert InvalidState();
+        Milestone storage m = milestones[projectId][index];
+        if (m.state != MilestoneState.SUBMITTED) revert InvalidState();
+        // Complements releaseAfterReviewTimeout, which requires timestamp > reviewEnd.
+        if (block.timestamp > m.reviewEnd) revert NotReady();
+        m.state = MilestoneState.DISPUTED;
+        emit MilestoneFrozen(projectId, index);
+    }
+
+    function settleDisputedMilestone(uint256 projectId, uint256 index, uint256 freelancerBps)
+        external override onlyArbitration nonReentrant
+    {
+        if (freelancerBps > 10_000) revert InvalidInput();
+        Project storage p = projects[projectId];
+        if (p.state != ProjectState.ACTIVE || index != p.currentMilestone) revert InvalidState();
+        if (milestones[projectId][index].state != MilestoneState.DISPUTED) revert InvalidState();
+        _settle(projectId, index, freelancerBps);
+        emit DisputedMilestoneSettled(projectId, index, freelancerBps);
     }
 
     function createProject(

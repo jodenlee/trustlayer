@@ -2,7 +2,7 @@
 
 **Decentralized Freelance Escrow and Dispute Resolution Protocol**
 
-Phase 1 repository starter. Implemented today: local ERC-20 token and an initial milestone escrow smart contract. **Arbitration, staking and the frontend are NOT implemented.** This is not audited or ready for handling real funds.
+Implemented today: the Phase 1 local ERC-20 token and milestone escrow, Phase 2A arbitration configuration, freezing and settlement hooks, and Phase 2B juror registration, staking and assignment locks. **Arbitration decision logic, penalties, rewards and the frontend are NOT implemented.** This is not audited or ready for handling real funds.
 
 ## Requirements
 
@@ -59,6 +59,20 @@ docs/                   architecture and delivery milestones
 
 The escrow contract tracks `totalEscrowLiability` to test custody solvency. Only sequential milestones can be settled, and settled milestones cannot pay twice.
 
+## Phase 2A arbitration foundation
+
+The deployer may configure a deployed arbitration contract exactly once using `setArbitrationContract`. Only that contract may freeze the current submitted milestone during its review window and settle it using a 0–10,000-bps freelancer allocation. Normal payouts and refunds cannot settle frozen milestones. Partial freelancer allocations retain the existing 1% service fee, and the client receives the remainder of the milestone amount.
+
+`getDisputeContext` exposes participants, amount, project/milestone states and review deadline. See [Phase 2A design and verification](docs/PHASE2A.md) for initialization, exact deadline and rounding rules, events, tests and trust boundaries. The existing Phase 1 deployment module leaves arbitration unconfigured; test harnesses are not deployed by it.
+
+## Phase 2B juror registry and staking
+
+`JurorRegistry` lets wallets register, deposit mUSD and withdraw their own unlocked stake. New assignments require 100 mUSD unlocked per juror. Only the one-time configured arbitration contract can reserve three distinct jurors and release their locks. Selection rotates deterministically through the eligible pool, excludes the client and freelancer, and fails atomically if fewer than three candidates qualify. It is predictable and does not supply secure randomness or Sybil resistance.
+
+Each assignment locks 100 mUSD per juror until authorized release; additional stake permits concurrent assignments. Read methods expose deposited/locked/available balances, eligible jurors and active/historical assignments. Juror custody stays separate from escrow and treasury funds. See [Phase 2B rules and verification](docs/PHASE2B.md) for exact rotation, staking, finalization and trust boundaries.
+
+For an optional local deployment, use `npx.cmd hardhat ignition deploy ignition/modules/Phase2B.ts --network localhost` with a running Hardhat node. This reuses the Phase 1 module and leaves arbitration unconfigured in both contracts.
+
 ## Design decisions
 
 | Setting | Value |
@@ -69,7 +83,8 @@ The escrow contract tracks `totalEscrowLiability` to test custody solvency. Only
 | Late delivery grace | 48 hours |
 | Review time | 72 hours |
 | Service fee | 1% of freelancer's gross payment |
-| Arbitration (next phase) | 3 jurors; 15 mUSD dispute fee; 50/50 fallback |
+| Juror staking | 100 mUSD minimum unlocked for selection; 100 mUSD locked per assignment |
+| Arbitration decision logic (future phase) | 3 jurors; 15 mUSD dispute fee; 50/50 fallback |
 
 ## GitHub setup
 
@@ -98,4 +113,4 @@ git push -u origin main
 
 ## Limits and security
 
-This initial implementation has not been compiled or tested in this packaging environment (npm registry unavailable). Run `npm install`, `npm run compile`, and `npm test` on your computer, then report any errors before extending it. Do not deposit real assets. The current contract **does not yet support disputes**, so its approval/release paths should be treated as Phase 1 only.
+Run `npm install`, `npm run compile`, `npm test` and `npm run typecheck` to verify locally; use `npm.cmd` when PowerShell blocks `npm.ps1`. Do not deposit real assets. Phase 2A and Phase 2B provide escrow and staking foundations, not a complete dispute system. Arbitration configuration is irreversible; frozen milestones and locked juror stakes depend on authorized arbitration finalization. See `docs/PHASE2A.md` and `docs/PHASE2B.md` before configuring arbitration; unrestricted test harnesses must never be used on a live deployment.

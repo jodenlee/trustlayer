@@ -2,15 +2,18 @@
 
 Source of truth: TrustLayer Solution Design Document v1.0 (2026-11-16).
 
-## Phase 1 — repo and escrow vertical slice (started)
+## Phase 1 — repo and escrow vertical slice (completed and verified)
 - MockUSD (6 decimals) test token
 - TrustEscrow: create, fund, accept, submit, approve, release after review, refund non-delivery, refund unaccepted
 - Contract tests for balances, unauthorized calls, deadlines, single settlement, and liability conservation
 - Hardhat local deployment
 
 ## Phase 2 — advanced protocol
+- Phase 2A: escrow interface, one-time arbitration configuration, authorized milestone freezing and basis-point settlement; implemented with tests. See [Phase 2A](PHASE2A.md).
+- Phase 2B: JurorRegistry registration, 100 mUSD eligibility and per-assignment locks, deterministic three-juror rotation, conflict exclusions and authorized release; implemented with tests. See [Phase 2B](PHASE2B.md).
+- Remaining protocol work follows; Phase 2A and Phase 2B do not implement the decision system.
 - ProtocolTreasury separate contract (currently placeholder treasury wallet)
-- JurorRegistry with 100 mUSD stake, 3 distinct jurors, stake locking and attendance penalties
+- Juror attendance penalties and any associated reward/slashing rules (not included in Phase 2B)
 - DisputeArbitration with 15 mUSD fee, 12 juror / 3 protocol, 12-hour response, 24-hour voting, 50/50 fallback
 - Authorized arbitration-only escrow freeze and settlement; no public verdict authority
 - Security and invariant tests for cross-contract interactions
@@ -27,4 +30,4 @@ Source of truth: TrustLayer Solution Design Document v1.0 (2026-11-16).
 - White-paper claim-to-code review and presentation rehearsal
 
 ## Not implemented yet
-Disputes, jurors, staking, a real treasury contract, frontend, SIWE, evidence API, event index, production security audit, and optional Sepolia deployment.
+Dispute creation and decision logic, juror penalties and rewards, a real treasury contract, frontend, SIWE, evidence API, event index, production security audit, and optional Sepolia deployment.
