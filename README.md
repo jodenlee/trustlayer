@@ -2,7 +2,7 @@
 
 **Decentralized Freelance Escrow and Dispute Resolution Protocol**
 
-Implemented today: the Phase 1 local ERC-20 token and milestone escrow, Phase 2A arbitration configuration, freezing and settlement hooks, and Phase 2B juror registration, staking and assignment locks. **Arbitration decision logic, penalties, rewards and the frontend are NOT implemented.** This is not audited or ready for handling real funds.
+Implemented today: the Phase 1 local ERC-20 token and milestone escrow, Phase 2A arbitration hooks, Phase 2B juror staking/selection, and Phase 2C dispute creation, on-chain voting, majority/fallback verdicts and atomic settlement. **Treasury integration, penalties, rewards and the frontend are NOT implemented.** This is not audited or ready for handling real funds.
 
 ## Requirements
 
@@ -73,6 +73,16 @@ Each assignment locks 100 mUSD per juror until authorized release; additional st
 
 For an optional local deployment, use `npx.cmd hardhat ignition deploy ignition/modules/Phase2B.ts --network localhost` with a running Hardhat node. This reuses the Phase 1 module and leaves arbitration unconfigured in both contracts.
 
+## Phase 2C dispute resolution
+
+Either project participant may open a dispute over the current submitted milestone within its review window, paying 15 mUSD from their own approved wallet. Opening atomically collects the fee, freezes the milestone and locks 100 mUSD from each of three selected jurors. The other participant may record one response evidence hash during the first 12 hours.
+
+Voting starts at the 12-hour response deadline and remains open through the following 24-hour voting deadline, both voting boundaries inclusive. After that deadline, anyone may finalize. Two identical juror votes determine freelancer victory, client victory or a 50/50 split. Without two identical votes, including missing votes, the result is the 50/50 fallback. Finalization atomically settles escrow and unlocks juror stakes while preserving the 1% service fee on freelancer payouts.
+
+Dispute fees remain in arbitration, with the roadmap's 12 mUSD juror / 3 mUSD protocol portions tracked separately; no rewards or fee withdrawals exist. See [Phase 2C design, tests and custody limitations](docs/PHASE2C.md). The non-upgradeable fee-custody transition requires an explicit Phase 2D design decision before real-value deployment.
+
+`ignition/modules/Phase2C.ts` deploys the full local stack and connects both one-time arbitration authorizations. With a running local Hardhat node, use `npx.cmd hardhat ignition deploy ignition/modules/Phase2C.ts --network localhost`. Earlier deployments already configured to another arbitration address require a fresh local deployment.
+
 ## Design decisions
 
 | Setting | Value |
@@ -84,7 +94,7 @@ For an optional local deployment, use `npx.cmd hardhat ignition deploy ignition/
 | Review time | 72 hours |
 | Service fee | 1% of freelancer's gross payment |
 | Juror staking | 100 mUSD minimum unlocked for selection; 100 mUSD locked per assignment |
-| Arbitration decision logic (future phase) | 3 jurors; 15 mUSD dispute fee; 50/50 fallback |
+| Arbitration | 3 jurors; 15 mUSD opener-paid fee; 12-hour response then 24-hour voting; 50/50 fallback |
 
 ## GitHub setup
 
@@ -113,4 +123,4 @@ git push -u origin main
 
 ## Limits and security
 
-Run `npm install`, `npm run compile`, `npm test` and `npm run typecheck` to verify locally; use `npm.cmd` when PowerShell blocks `npm.ps1`. Do not deposit real assets. Phase 2A and Phase 2B provide escrow and staking foundations, not a complete dispute system. Arbitration configuration is irreversible; frozen milestones and locked juror stakes depend on authorized arbitration finalization. See `docs/PHASE2A.md` and `docs/PHASE2B.md` before configuring arbitration; unrestricted test harnesses must never be used on a live deployment.
+Run `npm install`, `npm run compile`, `npm test` and `npm run typecheck` to verify locally; use `npm.cmd` when PowerShell blocks `npm.ps1`. Do not deposit real assets. Arbitration configuration is irreversible; frozen milestones and locked juror stakes require a finalization transaction after voting ends. Dispute fees have no withdrawal path in Phase 2C. Review `docs/PHASE2A.md`, `docs/PHASE2B.md` and `docs/PHASE2C.md` before deployment or configuration; unrestricted test harnesses must never be used on a live deployment.
