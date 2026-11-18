@@ -104,7 +104,8 @@ export function ProjectDetail({ project }: { project: Project }) {
                         <div className="milestone-actions">
                           <Button disabled>Review & approve</Button>
                           <span className="small text-muted">
-                            72-hour review window · wallet integration required
+                            72-hour review window · project transactions not
+                            enabled
                           </span>
                         </div>
                       )}

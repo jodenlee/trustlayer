@@ -8,7 +8,7 @@ export const metadata: Metadata = {
     template: "%s | TrustLayer",
   },
   description:
-    "A local interface preview for milestone escrow and independent dispute resolution. No wallet connection or transactions.",
+    "A local TrustLayer workspace with injected wallet connection and verified contract reads. Project transactions are not enabled.",
 };
 export default function RootLayout({
   children,

@@ -9,8 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import { CheckCircle2, X } from "lucide-react";
-import { Dialog } from "./dialog";
-import { Button } from "./ui";
+import { BlockchainProvider } from "./blockchain-provider";
+import { WalletDialog } from "./wallet";
 
 interface PreviewContext {
   sample: boolean;
@@ -29,6 +29,13 @@ export function usePreview() {
   return context;
 }
 export function Providers({ children }: { children: ReactNode }) {
+  return (
+    <BlockchainProvider>
+      <PreviewProvider>{children}</PreviewProvider>
+    </BlockchainProvider>
+  );
+}
+function PreviewProvider({ children }: { children: ReactNode }) {
   const [sample, setSample] = useState(true);
   const [name, setName] = useState("Alex Morgan");
   const [precise, setPrecise] = useState(false);
@@ -55,24 +62,7 @@ export function Providers({ children }: { children: ReactNode }) {
       }}
     >
       {children}
-      <Dialog
-        open={wallet}
-        onClose={() => setWallet(false)}
-        title="Wallet connection"
-      >
-        <span className="badge badge-blue">Coming in Phase 3B</span>
-        <p className="mt-4">
-          This is an interface preview. Wallet connection is not available yet,
-          and no connection request was made.
-        </p>
-        <p className="small text-muted mt-3">
-          Your funds stay in your wallet. This app does not read balances, send
-          transactions or contact a blockchain.
-        </p>
-        <Button className="mt-6" onClick={() => setWallet(false)}>
-          Got it
-        </Button>
-      </Dialog>
+      <WalletDialog open={wallet} onClose={() => setWallet(false)} />
       <div
         className="toast-region"
         role="status"

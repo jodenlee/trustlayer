@@ -1,12 +1,11 @@
 "use client";
 import { useState, type FormEvent } from "react";
-import { Info, Monitor, Wallet } from "lucide-react";
-import { networkPreview } from "@/lib/blockchain/config";
+import { Info, Monitor } from "lucide-react";
+import { LiveWalletCard, ProtocolConnectionCard } from "./live-wallet";
 import { Button, Card, CardHeading, Field, Input, PageHeading } from "./ui";
 import { usePreview } from "./providers";
 export function Settings() {
-  const { name, setName, precise, setPrecise, toast, openWallet } =
-    usePreview();
+  const { name, setName, precise, setPrecise, toast } = usePreview();
   const [draftName, setDraftName] = useState(name);
   const [error, setError] = useState("");
   function save(event: FormEvent) {
@@ -94,60 +93,15 @@ export function Settings() {
           </Card>
         </div>
         <div className="space-y-5">
-          <Card>
-            <CardHeading
-              title="Wallet & network"
-              action={<Wallet size={19} className="text-muted" />}
-            />
-            <div className="card-body pt-0!">
-              <dl className="summary-list">
-                <div>
-                  <dt>Wallet</dt>
-                  <dd>Not connected</dd>
-                </div>
-                <div>
-                  <dt>Account address</dt>
-                  <dd>Unavailable</dd>
-                </div>
-                <div>
-                  <dt>Planned network</dt>
-                  <dd>{networkPreview.name}</dd>
-                </div>
-                <div>
-                  <dt>Chain ID</dt>
-                  <dd>{networkPreview.chainId}</dd>
-                </div>
-                <div>
-                  <dt>Payment token</dt>
-                  <dd>
-                    {networkPreview.token} · {networkPreview.decimals} decimals
-                  </dd>
-                </div>
-                <div>
-                  <dt>RPC status</dt>
-                  <dd>Not connected</dd>
-                </div>
-                <div>
-                  <dt>Contract deployment</dt>
-                  <dd>Not loaded</dd>
-                </div>
-              </dl>
-              <Button
-                variant="secondary"
-                className="w-full mt-5"
-                onClick={openWallet}
-              >
-                <Wallet size={15} />
-                About wallet connection
-              </Button>
-            </div>
-          </Card>
+          <LiveWalletCard />
+          <ProtocolConnectionCard />
           <div className="info-note">
             <Info size={15} />
             <p>
-              This is metadata for future local-chain integration, not a live
-              network reading. Sepolia connectivity, signing, and backend
-              profiles are outside this phase.
+              Live data requires a verified persistent local deployment. Sample
+              projects remain fictional even when a wallet is connected. Project
+              transactions, Sepolia, and backend profiles are outside this
+              phase.
             </p>
           </div>
         </div>

@@ -11,6 +11,55 @@
   --border: #e5e9ef;
   --surface: #f6f8fb;
 }
+.wallet-address {
+  display: block;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  max-width: 100%;
+}
+.summary-list dd {
+  min-width: 0;
+}
+.wallet-warning {
+  padding: 14px;
+  border: 1px solid #ecdfc7;
+  border-radius: 8px;
+  background: #fcf8ef;
+  color: #856938;
+}
+.network-warning {
+  color: #9a783b;
+}
+.live-wallet {
+  margin-bottom: 0;
+}
+.live-wallet .summary-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 25px;
+}
+.settings-grid .live-wallet .summary-list {
+  display: block;
+}
+.contract-addresses > div {
+  flex-direction: column;
+  gap: 6px;
+}
+.contract-addresses dd {
+  text-align: left;
+}
+.transaction-feedback {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: white;
+}
+@media (max-width: 767px) {
+  .live-wallet .summary-list {
+    display: block;
+  }
+}
 * {
   box-sizing: border-box;
 }

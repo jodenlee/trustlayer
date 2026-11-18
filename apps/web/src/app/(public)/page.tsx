@@ -218,8 +218,8 @@ export default function LandingPage() {
           <Logo />
           <p>
             TrustLayer is an unaudited development protocol. MockUSD has no real
-            monetary value. This interface preview does not connect a wallet or
-            execute transactions.
+            monetary value. Project transactions are not enabled. Wallet
+            connection and verified reads are available in the workspace.
           </p>
         </footer>
       </div>

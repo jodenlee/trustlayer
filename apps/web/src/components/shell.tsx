@@ -14,11 +14,11 @@ import {
   Menu,
   Settings2,
   ShieldCheck,
-  Wallet,
 } from "lucide-react";
 import { usePreview } from "./providers";
 import { Button } from "./ui";
 import { Dialog } from "./dialog";
+import { WalletControl, WalletNetworkStatus } from "./wallet";
 
 export function Logo() {
   return (
@@ -85,19 +85,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         </Link>
         <div className="local-badge">
           <span className="status-dot" />
-          Local development<span>Phase 3A</span>
+          Local development<span>Phase 3B</span>
         </div>
       </div>
     </>
-  );
-}
-export function WalletPlaceholder() {
-  const { openWallet } = usePreview();
-  return (
-    <Button variant="secondary" onClick={openWallet}>
-      <Wallet size={16} aria-hidden="true" />
-      <span>Connect wallet</span>
-    </Button>
   );
 }
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -131,11 +122,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </span>
           </div>
           <div className="header-actions">
-            <span className="disconnected">
-              <span className="status-dot" />
-              Not connected
-            </span>
-            <WalletPlaceholder />
+            <WalletNetworkStatus />
+            <WalletControl />
             <Link
               href="/settings"
               aria-label="Profile settings"
@@ -159,8 +147,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <strong>Interface preview</strong>
                 <span>
                   {" "}
-                  · {sample ? "Fictional sample data" : "Empty workspace"}. No
-                  wallet connected.
+                  · {sample ? "Fictional sample data" : "Empty workspace"}.
+                  Project actions are disabled; live wallet data is labeled
+                  separately.
                 </span>
               </p>
             </div>

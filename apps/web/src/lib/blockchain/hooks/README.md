@@ -1,5 +1,7 @@
-# Phase 3B hook boundary
+# Phase 3B contract boundary
 
-No wallet/provider/hooks are initialized in Phase 3A. Add Wagmi providers and read adapters here only after authorization. Convert real contract states into `lib/models.ts` rather than passing preview fixtures to transactions.
+`useVerifiedDeployment` loads the public mirror of the generated export and validates schema, ABI hashes, persistent provenance, port 8545, chain ID, verification block and all five runtimes. Both the HTTP RPC and injected wallet must see the same deployment. Ephemeral verification exports are rejected.
 
-Use `@trustlayer/contracts` ABIs and typed `getContracts`; never copy ABIs into the app. Require an explicit fresh manifest, `parseLocalDeployment`, `assertDeploymentOnChain`, matching wallet chain/account and mutable permission reads before enabling writes. Do not auto-load the checked-in ephemeral manifest. Account/chain changes must invalidate cached state. Keep private evidence off-chain.
+`useTokenBalance` and `useProtocolReads` execute typed Viem reads only after verification, with account/chain/block-anchor query keys. Values are hidden while verifying or after errors/disconnection. No preview IDs or fixture quantities enter these hooks.
+
+`useProtocolTransaction` supplies guarded generic wallet callbacks, message signing and receipt tracking for future reviewed workflows. There are no callers that submit transactions or sign messages in Phase 3B. Account/chain changes invalidate the tracking context; a submitted hash is never treated as a successful payment. See `docs/PHASE3B.md` before extending this boundary. Keep private evidence off-chain.

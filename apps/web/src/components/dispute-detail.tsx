@@ -193,7 +193,7 @@ export function DisputeDetail({
             <CardHeading title="Case actions" />
             <div className="card-body pt-0! space-y-3">
               <Button className="w-full" disabled>
-                Cast vote · wallet required
+                Cast vote · not enabled
               </Button>
               <Button className="w-full" variant="secondary" disabled>
                 Finalize dispute

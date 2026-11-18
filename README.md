@@ -2,7 +2,7 @@
 
 **Decentralized Freelance Escrow and Dispute Resolution Protocol**
 
-Implemented today: milestone escrow, juror staking/selection, on-chain dispute voting and atomic settlement, protocol treasury and fixed juror pull rewards, plus the **Phase 3A frontend foundation**. The frontend is a clearly labeled interface preview with no wallet, RPC, transaction or backend integration. Penalties and reputation remain unimplemented. This protocol is not audited or ready for handling real funds.
+Implemented today: milestone escrow, juror staking/selection, on-chain dispute voting and atomic settlement, protocol treasury and fixed juror pull rewards, plus the frontend foundation and **Phase 3B wallet/read integration**. Injected wallets can connect to a verified local deployment and read real mUSD/public protocol state. Project/case views remain clearly labeled samples; project transactions and backend integration are not enabled. Penalties and reputation remain unimplemented. This protocol is not audited or ready for handling real funds.
 
 ## Requirements
 
@@ -98,7 +98,7 @@ Use `ignition/modules/Phase2D.ts` for the complete new local stack. It pins the 
 
 `npm.cmd run export:abis` exports the five production ABIs and complete function/event inventory to `packages/contracts/generated/`. After a persistent local deployment, `npm.cmd run export:contracts` validates and exports its addresses, chain ID, hashes and public authorities. The TypeScript package provides typed Viem/Wagmi configurations and live chain/code validation. The verification-generated manifest is ephemeral and its node is stopped; re-export from your actual persistent node before frontend use.
 
-The complete suite has 156 tests, including normal first-milestone payment followed by all four arbitration outcomes on the second milestone. Production Solidity and the earlier 143 tests are unchanged in this phase. See [Phase 2E workflows, security review and exact export/deployment commands](docs/PHASE2E.md) and the [contract package guide](packages/contracts/README.md). No frontend or backend is implemented.
+The complete blockchain suite has 156 tests, including normal first-milestone payment followed by all four arbitration outcomes on the second milestone. Production Solidity and the earlier 143 tests are unchanged in Phase 2E. See [Phase 2E workflows, security review and exact export/deployment commands](docs/PHASE2E.md) and the [contract package guide](packages/contracts/README.md). Later frontend work is described below; no backend is implemented.
 
 ## Design decisions
 
@@ -118,16 +118,18 @@ The complete suite has 156 tests, including normal first-milestone payment follo
 
 TrustLayer is maintained by one developer with Codex assistance. Follow `AGENTS.md`, use focused changes and review the diff and verification results before committing. Keep credentials, populated environment files, node_modules and cache out of Git. Pushes, merges and public deployments require explicit approval.
 
-The smart-contract verification remains available independently. Phase 3A now adds a local frontend foundation; review it before authorizing Phase 3B wallet and contract-read integration. Backend implementation remains deferred.
+Smart-contract verification remains available independently. Phase 3A provides the frontend foundation; Phase 3B adds wallet connection and verified local contract reads. Review Phase 3B before authorizing Phase 3C or transaction workflows. Backend implementation remains deferred.
 
-## Phase 3A frontend preview
+## Frontend foundation and Phase 3B wallet reads
 
 ```powershell
 npm.cmd --prefix apps/web ci
 npm.cmd run web:dev
 ```
 
-Open http://127.0.0.1:3000. No blockchain node or wallet is required. The light, responsive interface covers the landing page, dashboard, projects/draft creation/details, disputes/details, juror workspace, empty transaction history and session preferences. Preview content is explicitly fictional. Drafts are never submitted and wallet controls explain the deferred integration.
+Open http://127.0.0.1:3000. Navigation/sample views work without a blockchain node or wallet. The light, responsive interface covers the landing page, dashboard, projects/draft creation/details, disputes/details, juror workspace, empty transaction history and session preferences. Preview content is explicitly fictional and drafts are never submitted. Wallet controls now connect MetaMask/compatible injected wallets; live wallet information is labeled separately.
+
+For live reads, start a persistent node on http://127.0.0.1:8545, deploy Phase2D, and export with `TRUSTLAYER_EXPORT_EPHEMERAL=false` using the exact [Phase 3B setup commands](docs/PHASE3B.md). The checked-in ephemeral verification manifest is intentionally rejected. Dev/build syncs the generated export to ignored public frontend metadata; after re-exporting while the app runs, use `npm.cmd --prefix apps/web run contracts:sync` and Retry verification. No addresses or ABIs are manually copied into page components.
 
 ```powershell
 npm.cmd run web:lint
@@ -136,7 +138,7 @@ npm.cmd run web:build
 npm.cmd run web:start
 ```
 
-For browser tests, stop any server on port 3000, build first, then use `npm.cmd --prefix apps/web exec -- playwright install chromium` followed by `npm.cmd run web:test`. To use installed Chrome instead, set `$env:PLAYWRIGHT_CHANNEL='chrome'` before running the tests. Tests own and stop their production server. Frontend dependencies and lockfile live only in `apps/web`; root `compile`, `test`, and `typecheck` still verify the blockchain project. See [Phase 3A](docs/PHASE3A.md) for verification results and known limitations.
+Run `npm.cmd --prefix apps/web run test:unit` for metadata, token precision and transaction-state tests. For browser tests, stop any server on port 3000, build first, then use `npm.cmd --prefix apps/web exec -- playwright install chromium` followed by `npm.cmd run web:test`. To use installed Chrome instead, set `$env:PLAYWRIGHT_CHANNEL='chrome'` before running the tests. Tests own and stop their production server. Frontend dependencies and lockfile live only in `apps/web`; root `compile`, `test`, and `typecheck` still verify the blockchain project. See [Phase 3A](docs/PHASE3A.md) for the design foundation and [Phase 3B](docs/PHASE3B.md) for current results, wallet setup, manual MetaMask steps and limitations. Browser wallet tests use deterministic mocked providers; actual MetaMask interaction is a separate manual check.
 
 ## Limits and security
 

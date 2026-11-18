@@ -87,14 +87,14 @@ export function JurorWorkspace() {
                 <div className="flex flex-wrap gap-3 mt-5">
                   <TextLink href="/disputes/dp-2001">Review case</TextLink>
                   <Button className="ml-auto" disabled>
-                    Cast vote · wallet required
+                    Cast vote · not enabled
                   </Button>
                 </div>
               </div>
             ) : (
               <EmptyState
                 title="Ready for a new perspective?"
-                description="Connect a wallet in the next phase to view eligibility and real assignments."
+                description="Wallet connection is available now. Eligibility and assignment reads are planned for a later phase."
                 action={
                   <Button variant="secondary" onClick={openWallet}>
                     About wallet connection
@@ -113,7 +113,7 @@ export function JurorWorkspace() {
               description="Finalized cases reserve 4 mUSD for each assigned juror, including abstainers. No reward claim or transaction has been loaded."
             />
             <div className="card-body card-divider">
-              <Button disabled>Claim rewards · wallet required</Button>
+              <Button disabled>Claim rewards · not enabled</Button>
             </div>
           </Card>
         </div>
@@ -137,7 +137,8 @@ export function JurorWorkspace() {
                 </Button>
               </div>
               <p className="small text-muted mt-3">
-                Registration and token approvals require wallet integration.
+                Registration, staking, and reward actions are not enabled in
+                this phase.
               </p>
             </div>
           </Card>

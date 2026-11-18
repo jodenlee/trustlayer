@@ -1,3 +1,4 @@
 tsconfig.tsbuildinfo
 test-results/
 playwright-report/
+public/deployments/

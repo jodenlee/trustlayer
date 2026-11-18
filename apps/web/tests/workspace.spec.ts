@@ -90,14 +90,16 @@ test("empty preview is honest and persists through navigation", async ({
   ).toBeVisible();
 });
 
-test("wallet placeholder opens an accessible dialog without connecting", async ({
+test("wallet dialog explains connection and preserves accessible dismissal", async ({
   page,
 }) => {
   await page.goto("/dashboard");
-  const wallet = page.getByRole("button", {
-    name: "Connect wallet",
-    exact: true,
-  });
+  const wallet = page
+    .getByRole("button", {
+      name: "Connect wallet",
+      exact: true,
+    })
+    .first();
   await wallet.click();
   const dialog = page.getByRole("dialog", {
     name: "Wallet connection",
@@ -105,7 +107,7 @@ test("wallet placeholder opens an accessible dialog without connecting", async (
   });
   await expect(dialog).toBeVisible();
   await expect(
-    dialog.getByText(/no connection request was made/),
+    dialog.getByText(/Connection does not sign a message/),
   ).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(dialog).not.toBeVisible();
@@ -150,7 +152,7 @@ test("draft validation and review never create a project or payment", async ({
     dialog.getByText("10.123456 mUSD", { exact: true }),
   ).toBeVisible();
   await expect(
-    dialog.getByRole("button", { name: "Create project · wallet required" }),
+    dialog.getByRole("button", { name: "Create project · not enabled" }),
   ).toBeDisabled();
   await expect(dialog.getByText("Local draft · not created")).toBeVisible();
 });
@@ -212,7 +214,7 @@ test("dispute views show boundaries and no invented results", async ({
     page.getByText(/strictly after the voting deadline/),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Cast vote · wallet required" }),
+    page.getByRole("button", { name: "Cast vote · not enabled" }),
   ).toBeDisabled();
   await page.getByRole("button", { name: "About private evidence" }).click();
   await expect(

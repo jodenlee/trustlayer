@@ -137,7 +137,7 @@ export function DisputeList() {
             description={
               sample
                 ? "This preview has no finalized cases or settlement results."
-                : "Cases involving your projects will appear after wallet integration."
+                : "Cases involving your projects will appear when case reads are integrated."
             }
           />
         )}

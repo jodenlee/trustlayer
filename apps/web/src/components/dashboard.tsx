@@ -22,6 +22,7 @@ import { ProjectTable } from "./project-table";
 import { StatCard } from "./stats";
 import { Money } from "./money";
 import { usePreview } from "./providers";
+import { LiveWalletCard } from "./live-wallet";
 
 export function Dashboard() {
   const { sample, name } = usePreview();
@@ -38,6 +39,9 @@ export function Dashboard() {
           </ButtonLink>
         }
       />
+      <div className="mb-6">
+        <LiveWalletCard />
+      </div>
       <div className="stats-grid">
         <StatCard
           label="Active projects"
@@ -45,7 +49,7 @@ export function Dashboard() {
           note={
             sample
               ? "Across client & freelancer roles"
-              : "Connect a wallet in Phase 3B"
+              : "Project data is not integrated yet"
           }
           icon={BriefcaseBusiness}
         />
@@ -94,7 +98,7 @@ export function Dashboard() {
           ) : (
             <EmptyState
               title="Your next project starts here"
-              description="Projects will appear after wallet integration. You can explore the creation form now."
+              description="Real project reads are not integrated yet. You can explore the local creation form now."
               action={
                 <ButtonLink href="/projects/new" variant="secondary">
                   Explore project form

@@ -21,6 +21,7 @@ Source of truth: TrustLayer Solution Design Document v1.0 (2026-11-16).
 
 ## Phase 3 — dApp and evidence
 - Phase 3A: responsive Next.js App Router frontend at `apps/web`, shared design system, typed preview models, all workspace routes, draft validation, and an inert contract integration boundary. No wallet/RPC/transaction/backend integration. See [Phase 3A](PHASE3A.md). Stop for review before Phase 3B.
+- Phase 3B: injected Wagmi/Viem wallets, explicit local-chain switching, persistent-manifest and RPC/wallet block/runtime validation, real token/public-state reads and unbound transaction lifecycle utilities. No project/staking/voting actions or backend. See [Phase 3B](PHASE3B.md). Stop for review before Phase 3C.
 - Next.js/TypeScript/Tailwind + Wagmi/Viem
 - Wallet connect, client, freelancer, juror dashboards
 - Wallet SIWE server sessions and private evidence storage; SHA-256 content hashes
@@ -32,4 +33,4 @@ Source of truth: TrustLayer Solution Design Document v1.0 (2026-11-16).
 - White-paper claim-to-code review and presentation rehearsal
 
 ## Not implemented yet
-Juror penalties, migration of old deployed funds, wallet and blockchain frontend integration, SIWE, evidence API, event index, production security audit, and optional Sepolia deployment. Phase 3A implements the frontend foundation only. Fixed Phase 2D juror rewards and the protocol treasury are implemented.
+Juror penalties, migration of old deployed funds, project/milestone/arbitration/staking frontend transaction flows, SIWE, evidence API, event index, production security audit, and optional Sepolia deployment. Phase 3A provides the frontend foundation and Phase 3B adds injected wallet connection and verified local reads. Fixed Phase 2D juror rewards and the protocol treasury are implemented.

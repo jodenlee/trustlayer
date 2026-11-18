@@ -13,10 +13,12 @@ import {
 import type { TransactionView } from "@/lib/models";
 import { Money } from "./money";
 import { deadlineLabel } from "@/lib/format";
+import { useConnection } from "wagmi";
 /** Intentionally empty: Phase 3A never manufactures transaction hashes or confirmations. */
 const transactions: TransactionView[] = [];
 export function Transactions() {
   const { openWallet } = usePreview();
+  const { isConnected } = useConnection();
   return (
     <>
       <PageHeading
@@ -56,7 +58,7 @@ export function Transactions() {
         ) : (
           <EmptyState
             title="Your transaction history starts here"
-            description="No wallet is connected and no transactions have been loaded. There are no sample confirmations or transaction hashes."
+            description={`${isConnected ? "Wallet connected; transaction history is not integrated yet." : "No wallet is connected and no transactions have been loaded."} There are no sample confirmations or transaction hashes.`}
             action={
               <Button variant="secondary" onClick={openWallet}>
                 About wallet connection

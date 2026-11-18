@@ -122,7 +122,7 @@ export function ProjectForm() {
                 <Field
                   id="freelancer"
                   label="Freelancer wallet address"
-                  hint="An EVM address. No wallet or account is queried in this preview."
+                  hint="The freelancer’s EVM address. This draft does not query that account."
                 >
                   <Input
                     id="freelancer"
@@ -290,7 +290,7 @@ export function ProjectForm() {
           submitted.
         </p>
         <Button className="w-full mt-5" disabled>
-          Create project · wallet required
+          Create project · not enabled
         </Button>
         <Button
           className="w-full mt-2"
