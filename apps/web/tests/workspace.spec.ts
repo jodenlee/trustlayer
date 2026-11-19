@@ -209,9 +209,11 @@ test("dispute views show boundaries and no invented results", async ({
   page,
 }) => {
   await page.goto("/disputes/dp-2001");
-  await expect(page.getByText("Not finalized", { exact: true })).toBeVisible();
   await expect(
-    page.getByText(/strictly after the voting deadline/),
+    page.getByRole("main").getByText("Not finalized", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("main").getByText(/strictly after the voting deadline/),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Cast vote · not enabled" }),

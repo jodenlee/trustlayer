@@ -15,7 +15,7 @@ export function BlockchainProvider({ children }: { children: ReactNode }) {
       }),
   );
   return (
-    <WagmiProvider config={config} reconnectOnMount={false}>
+    <WagmiProvider config={config} reconnectOnMount>
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     </WagmiProvider>
   );

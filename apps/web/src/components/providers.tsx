@@ -13,6 +13,7 @@ import { BlockchainProvider } from "./blockchain-provider";
 import { WalletDialog } from "./wallet";
 import { WorkflowProvider } from "./workflow-provider";
 import { ReviewedActionProvider } from "./reviewed-action";
+import { AuthProvider } from "./auth-provider";
 
 interface PreviewContext {
   sample: boolean;
@@ -33,9 +34,11 @@ export function usePreview() {
 export function Providers({ children }: { children: ReactNode }) {
   return (
     <BlockchainProvider>
-      <WorkflowProvider>
-        <PreviewProvider>{children}</PreviewProvider>
-      </WorkflowProvider>
+      <AuthProvider>
+        <WorkflowProvider>
+          <PreviewProvider>{children}</PreviewProvider>
+        </WorkflowProvider>
+      </AuthProvider>
     </BlockchainProvider>
   );
 }

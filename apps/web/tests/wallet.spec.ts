@@ -28,7 +28,9 @@ test("connection reads real-provider data, displays metadata, and disconnect cle
   await installWallet(page);
   await installRpc(page);
   await page.goto("/settings");
-  await expect(page.getByTestId("live-balance")).toHaveText("—");
+  await expect(page.getByRole("main").getByTestId("live-balance")).toHaveText(
+    "—",
+  );
   await connectWallet(page);
   await expect(
     page.getByText("Wallet connected", { exact: true }),

@@ -4,6 +4,7 @@ import { Info, Monitor } from "lucide-react";
 import { LiveWalletCard, ProtocolConnectionCard } from "./live-wallet";
 import { Button, Card, CardHeading, Field, Input, PageHeading } from "./ui";
 import { usePreview } from "./providers";
+import { BackendProfileCard } from "./backend-auth";
 export function Settings() {
   const { name, setName, precise, setPrecise, toast } = usePreview();
   const [draftName, setDraftName] = useState(name);
@@ -26,6 +27,7 @@ export function Settings() {
       />
       <div className="settings-grid">
         <div className="space-y-5">
+          <BackendProfileCard />
           <Card>
             <CardHeading
               title="Profile preferences"
@@ -99,9 +101,9 @@ export function Settings() {
             <Info size={15} />
             <p>
               Live data requires a verified persistent local deployment. Sample
-              projects remain fictional even when a wallet is connected. Project
-              transactions, Sepolia, and backend profiles are outside this
-              phase.
+              projects remain fictional even when a wallet is connected. Backend
+              profiles are stored separately from blockchain state. Sepolia and
+              private evidence uploads remain deferred.
             </p>
           </div>
         </div>

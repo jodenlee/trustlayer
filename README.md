@@ -2,7 +2,7 @@
 
 **Decentralized Freelance Escrow and Dispute Resolution Protocol**
 
-Implemented today: milestone escrow, juror staking/selection, on-chain dispute voting and atomic settlement, protocol treasury and fixed juror pull rewards, plus **Phase 3D dispute and juror workflows** on the existing client/freelancer frontend. Verified local wallets can create/fund/deliver/pay projects, open disputes, respond with hashes, register/stake/withdraw as jurors, cast public votes, finalize and claim fixed rewards. Connected project, dispute and juror views show actual chain state; disconnected and explicit sample views remain labeled previews. Backend storage, penalties and reputation remain unimplemented. This protocol is not audited or ready for handling real funds.
+Implemented today: milestone escrow, juror staking/selection, on-chain dispute voting and atomic settlement, protocol treasury and fixed juror pull rewards, plus **Phase 3D dispute and juror workflows** and the **Phase 4A PostgreSQL/SIWE backend foundation**. Verified local wallets can create/fund/deliver/pay projects, open disputes, respond with hashes, register/stake/withdraw as jurors, cast public votes, finalize and claim fixed rewards. Connected views show actual chain state; sample views remain labeled previews. Phase 4A adds wallet-linked profiles and authorized metadata APIs; project creation text still uses the existing memory-only workflow. Hosted database setup, evidence storage, penalties and reputation remain outstanding. This protocol is not audited or ready for handling real funds.
 
 ## Requirements
 
@@ -44,6 +44,7 @@ apps/web/               Next.js frontend with isolated dependencies and lockfile
 web/                    pointer to the current frontend
 packages/contracts/     generated ABIs, typed clients and verified local manifest
 docs/                   architecture and delivery milestones
+supabase/migrations/   versioned private PostgreSQL schema and auth tables
 .github/workflows/      CI on every push and PR
 ```
 
@@ -98,7 +99,7 @@ Use `ignition/modules/Phase2D.ts` for the complete new local stack. It pins the 
 
 `npm.cmd run export:abis` exports the five production ABIs and complete function/event inventory to `packages/contracts/generated/`. After a persistent local deployment, `npm.cmd run export:contracts` validates and exports its addresses, chain ID, hashes and public authorities. The TypeScript package provides typed Viem/Wagmi configurations and live chain/code validation. The verification-generated manifest is ephemeral and its node is stopped; re-export from your actual persistent node before frontend use.
 
-The complete blockchain suite has 156 tests, including normal first-milestone payment followed by all four arbitration outcomes on the second milestone. Production Solidity and the earlier 143 tests are unchanged in Phase 2E. See [Phase 2E workflows, security review and exact export/deployment commands](docs/PHASE2E.md) and the [contract package guide](packages/contracts/README.md). Later frontend work is described below; no backend is implemented.
+Phase 2E introduced a 156-test blockchain suite, including normal first-milestone payment followed by all four arbitration outcomes on the second milestone. The later local provisioning task adds 26 tests, bringing that suite to 182 without production Solidity changes. See [Phase 2E workflows, security review and exact export/deployment commands](docs/PHASE2E.md) and the [contract package guide](packages/contracts/README.md). Current frontend and backend work is described below.
 
 ## Design decisions
 
@@ -118,7 +119,7 @@ The complete blockchain suite has 156 tests, including normal first-milestone pa
 
 TrustLayer is maintained by one developer with Codex assistance. Follow `AGENTS.md`, use focused changes and review the diff and verification results before committing. Keep credentials, populated environment files, node_modules and cache out of Git. Pushes, merges and public deployments require explicit approval.
 
-Smart-contract verification remains available independently. Phase 3A supplies the interface foundation, Phase 3B adds wallet/deployment verification, Phase 3C integrates escrow and Phase 3D integrates arbitration/staking/rewards. Stop after Phase 3D for review. Backend implementation remains deferred.
+Smart-contract verification remains available independently. Phase 3A supplies the interface foundation, Phase 3B adds wallet/deployment verification, Phase 3C integrates escrow and Phase 3D integrates arbitration/staking/rewards. Phase 4A adds PostgreSQL metadata and wallet authentication. Stop after Phase 4A for review; evidence storage and further integration require approval.
 
 ## Frontend through Phase 3D
 
@@ -139,6 +140,19 @@ npm.cmd run web:start
 ```
 
 Run `npm.cmd --prefix apps/web run test:unit` for metadata, precision, authorization/deadline guards and transaction-state tests. Build first, then use `npm.cmd --prefix apps/web exec -- playwright install chromium` followed by `npm.cmd run web:test`. To use installed Chrome, set `$env:PLAYWRIGHT_CHANNEL='chrome'`; set `$env:PLAYWRIGHT_PORT='3001'` to preserve a running port-3000 app. Tests own and stop their separate production server. Frontend dependencies and lockfile live only in `apps/web`; root `compile`, `test`, and `typecheck` still verify the blockchain project. Compile first on a clean checkout to generate artifact type declarations. Run both `npx.cmd hardhat run apps/web/scripts/verify-escrow-workflow.ts` and `npx.cmd hardhat run apps/web/scripts/verify-arbitration-workflow.ts` for real in-process production-contract integration without modifying your running node/export. See [Phase 3D](docs/PHASE3D.md) for current verification, MetaMask walkthrough and limits, [Phase 3C](docs/PHASE3C.md) for escrow/provisioning and [Phase 3B](docs/PHASE3B.md) for wallet setup. Browser tests use test-only providers; actual MetaMask testing is separate.
+
+## Phase 4A backend setup
+
+Next.js route handlers provide durable SIWE sessions, wallet-linked profiles and participant-authorized project metadata APIs using Supabase PostgreSQL. They never override blockchain state. Project creation metadata remains memory-only until a later explicit persistence integration. No evidence uploads are implemented.
+
+```powershell
+Copy-Item apps/web/.env.example apps/web/.env.local
+# Configure server-only DATABASE_URL, AUTH_ORIGIN and migration-owner URL locally.
+npm.cmd --prefix apps/web run db:migrate
+npm.cmd run web:dev
+```
+
+Apply migrations as database owner, then grant `trustlayer_server` to a dedicated runtime login. Connect MetaMask in Settings, explicitly sign in, and edit the separate wallet-linked profile. Local HTTP sign-in uses `next dev`; production requires HTTPS/Secure cookies. See [Phase 4A](docs/PHASE4A.md) for role grants, Supabase/TLS configuration, exact API contracts, verification results and disposable database reset instructions. No hosted database connection is claimed without credentials. Automated database tests use an isolated embedded PostgreSQL engine; `npx.cmd hardhat run apps/web/scripts/verify-backend-workflow.ts` also checks metadata authorization against actual production contracts on an isolated EVM. Existing local blockchain persistence issues remain deferred to Phase 5.
 
 ## Limits and security
 

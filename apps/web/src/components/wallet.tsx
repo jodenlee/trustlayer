@@ -15,6 +15,7 @@ import { Button } from "./ui";
 import { usePreview } from "./providers";
 import { localChain } from "@/lib/blockchain/config";
 import { describeError, shortenAddress } from "@/lib/blockchain/errors";
+import { BackendAuthControl } from "./backend-auth";
 
 export function walletNetwork(chainId?: number) {
   return chainId === localChain.id
@@ -29,32 +30,46 @@ export function walletNetwork(chainId?: number) {
 }
 export function WalletControl() {
   const { openWallet } = usePreview();
-  const { address, isConnected, isConnecting } = useConnection();
+  const { address, isConnected, isConnecting, isReconnecting } =
+    useConnection();
+  const restoring = isConnecting || isReconnecting;
   return (
     <Button
       variant="secondary"
-      aria-label={isConnected ? "Manage wallet" : "Connect wallet"}
+      aria-label={
+        restoring
+          ? "Restoring wallet"
+          : isConnected
+            ? "Manage wallet"
+            : "Connect wallet"
+      }
+      disabled={restoring}
       onClick={openWallet}
     >
       <Wallet size={16} aria-hidden="true" />
       <span>
-        {isConnected && address
-          ? shortenAddress(address)
-          : isConnecting
-            ? "Connecting…"
+        {restoring
+          ? "Restoring wallet…"
+          : isConnected && address
+            ? shortenAddress(address)
             : "Connect wallet"}
       </span>
     </Button>
   );
 }
 export function WalletNetworkStatus() {
-  const { isConnected, chainId } = useConnection();
+  const { isConnected, chainId, isConnecting, isReconnecting } =
+    useConnection();
   return (
     <span
       className={`disconnected ${isConnected && chainId !== localChain.id ? "network-warning" : ""}`}
     >
       <span className="status-dot" />
-      {isConnected ? walletNetwork(chainId) : "Not connected"}
+      {isConnecting || isReconnecting
+        ? "Restoring wallet…"
+        : isConnected
+          ? walletNetwork(chainId)
+          : "Not connected"}
     </span>
   );
 }
@@ -123,6 +138,7 @@ export function WalletDialog({
           <p className="small text-muted mt-3">
             {walletNetwork(connection.chainId)}
           </p>
+          <BackendAuthControl />
           {connection.chainId !== localChain.id && (
             <div className="wallet-warning mt-4">
               <p className="small mb-3">

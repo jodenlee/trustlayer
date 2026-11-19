@@ -367,5 +367,7 @@ test("creation confirms receipt project ID and labels metadata as session-only",
   await expect(
     page.getByRole("heading", { name: "Project #0", exact: true }),
   ).toBeVisible();
-  await expect(page.getByText(/Session metadata is unavailable/)).toBeVisible();
+  await expect(
+    page.getByRole("main").getByText(/Session metadata is unavailable/),
+  ).toBeVisible();
 });

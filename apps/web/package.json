@@ -15,7 +15,8 @@
     "test": "playwright test",
     "test:unit": "tsx --test unit/*.test.ts",
     "format": "prettier --write src tests unit test-support scripts *.ts *.mjs *.json",
-    "format:check": "prettier --check src tests unit test-support scripts *.ts *.mjs *.json"
+    "format:check": "prettier --check src tests unit test-support scripts *.ts *.mjs *.json",
+    "db:migrate": "node --env-file-if-exists=.env.local --import tsx scripts/db-migrate.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "5.3.0",
@@ -26,7 +27,10 @@
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "viem": "2.58.0",
-    "wagmi": "3.7.11"
+    "wagmi": "3.7.11",
+    "pg": "8.23.1",
+    "zod": "4.6.7",
+    "server-only": "0.0.1"
   },
   "devDependencies": {
     "@playwright/test": "1.65.1",
@@ -39,6 +43,8 @@
     "prettier": "3.10.1",
     "tailwindcss": "4.3.5",
     "tsx": "4.23.15",
-    "typescript": "~5.9.0"
+    "typescript": "~5.9.0",
+    "@electric-sql/pglite": "0.5.17",
+    "@types/pg": "8.23.1"
   }
 }

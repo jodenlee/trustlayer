@@ -29,10 +29,14 @@ Source of truth: TrustLayer Solution Design Document v1.0 (2026-11-16).
 - Wallet SIWE server sessions and private evidence storage; SHA-256 content hashes
 - Index on-chain events with reorg handling and idempotent processing
 
-## Phase 4 — hardening and demo
+## Phase 4 — backend and off-chain foundation
+- Phase 4A: Next.js server route handlers, private Supabase/PostgreSQL schema, durable SIWE nonces/sessions, own-profile editing, verified-participant project metadata APIs and separate frontend sign-in. Existing transaction and memory-only project workflows remain intact. See [Phase 4A](PHASE4A.md) for setup, verification and limitations. Stop after Phase 4A for review.
+- Phase 4B and later: private evidence storage/access and further metadata integration remain unimplemented and require approval.
+
+## Phase 5 — final integration, hardening and demo (deferred)
 - Edge cases, test coverage, manual walkthrough, transaction history
 - Demo seed accounts and deterministic local-chain time control
 - White-paper claim-to-code review and presentation rehearsal
 
 ## Not implemented yet
-Juror penalties, migration of old deployed funds, refund/treasury administration frontend actions, SIWE, evidence API, persistent metadata, reorg-aware event index, production security audit, and optional Sepolia deployment. Phase 3D supplies dispute/juror actions on the Phase 3A/3B/3C foundation. Fixed Phase 2D juror rewards and the protocol treasury remain unchanged. Phase 4/backend and further work require separate approval.
+Juror penalties, migration of old deployed funds, refund/treasury administration frontend actions, private evidence API/storage, automatic persistence of project creation drafts, reorg-aware event index, local blockchain persistence/recovery, production security audit, and optional Sepolia deployment. Phase 4A implements the backend/schema/SIWE foundation; hosted Supabase connectivity still requires external configuration. Fixed Phase 2D juror rewards and treasury remain unchanged. Stop after Phase 4A; Phase 4B and Phase 5 require separate approval.

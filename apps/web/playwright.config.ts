@@ -38,6 +38,9 @@ export default defineConfig({
     },
   ],
   webServer: {
+    // Regression servers must never use the developer's hosted database.
+    // Auth browser fixtures exercise the real API with their own isolated DB.
+    env: { DATABASE_URL: "", DATABASE_MIGRATION_URL: "" },
     command: `npm run start -- --port ${port}`,
     url: baseURL,
     reuseExistingServer: false,

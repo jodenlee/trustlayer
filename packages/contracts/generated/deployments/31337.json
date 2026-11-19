@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "module": "TrustLayerPhase2D",
   "chainId": 31337,
-  "deploymentId": "trustlayer-local",
+  "deploymentId": "chain-31337",
   "rpcUrl": "http://127.0.0.1:8545/",
   "ephemeral": false,
-  "verifiedAt": "2026-11-18T10:00:48.145Z",
+  "verifiedAt": "2026-11-19T14:04:50.780Z",
   "verifiedBlock": {
     "number": "9",
-    "hash": "0x58901e2614c6002757752870c8011998ae5bf3d66c78dec3f702d04fe930ada0"
+    "hash": "0x8f9aca375c5ca4d1bbbc0c9c5eb10af5f079a712347175244a3576289adcf03b"
   },
   "token": {
     "symbol": "mUSD",
@@ -48,7 +48,7 @@
     "treasuryConfigurator": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
   },
   "verification": {
-    "freshStateVerified": true,
+    "freshStateVerified": false,
     "configurationEventCounts": [
       1,
       1,
