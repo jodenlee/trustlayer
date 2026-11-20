@@ -31,11 +31,13 @@ export interface ProjectRecord extends Record<string, unknown> {
   onchain_project_id: string;
   client_wallet: string;
   freelancer_wallet: string;
+  revision: number;
 }
 export interface MilestoneRecord extends Record<string, unknown> {
   id: string;
   onchain_index: number;
   description: string;
+  name: string;
 }
 export class BackendService {
   constructor(
@@ -264,7 +266,7 @@ export class BackendService {
         "No persistent metadata has been saved for this project.",
       );
     const milestones = await this.db.query<MilestoneRecord>(
-      "SELECT id,onchain_index,description,metadata,created_at,updated_at FROM trustlayer.milestones WHERE project_id=$1 ORDER BY onchain_index",
+      "SELECT id,onchain_index,name,description,metadata,created_at,updated_at FROM trustlayer.milestones WHERE project_id=$1 ORDER BY onchain_index",
       [rows[0].id],
     );
     return { ...rows[0], milestones: milestones.rows };
@@ -283,6 +285,7 @@ export class BackendService {
         "Milestone index does not exist on-chain.",
       );
     const m = authority.manifest;
+    const syncHash = `0x${digest(JSON.stringify({ title: data.title, description: data.description, milestones: [...data.milestones].sort((a, b) => a.index - b.index) }))}`;
     await this.db.transaction(async (sql) => {
       const deployment = await sql.query(
         "INSERT INTO trustlayer.deployments (chain_id,escrow_address,arbitration_address,anchor_hash,anchor_number) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (chain_id,escrow_address,anchor_hash) DO UPDATE SET anchor_number=EXCLUDED.anchor_number RETURNING id",
@@ -294,8 +297,17 @@ export class BackendService {
           m.verifiedBlock.number,
         ],
       );
+      await sql.query(
+        "SELECT id FROM trustlayer.deployments WHERE id=$1 FOR UPDATE",
+        [deployment.rows[0].id],
+      );
+      const existing = await sql.query(
+        "SELECT sync_hash FROM trustlayer.projects WHERE deployment_id=$1 AND onchain_project_id=$2 FOR UPDATE",
+        [deployment.rows[0].id, id],
+      );
+      if (existing.rows[0]?.sync_hash === syncHash) return;
       const project = await sql.query(
-        "INSERT INTO trustlayer.projects (deployment_id,onchain_project_id,title,description,client_wallet,freelancer_wallet) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (deployment_id,onchain_project_id) DO UPDATE SET title=EXCLUDED.title,description=EXCLUDED.description,client_wallet=EXCLUDED.client_wallet,freelancer_wallet=EXCLUDED.freelancer_wallet RETURNING id",
+        "INSERT INTO trustlayer.projects (deployment_id,onchain_project_id,title,description,client_wallet,freelancer_wallet,sync_hash) VALUES ($1,$2,$3,$4,$5,$6,$8) ON CONFLICT (deployment_id,onchain_project_id) DO UPDATE SET title=EXCLUDED.title,description=EXCLUDED.description,client_wallet=EXCLUDED.client_wallet,freelancer_wallet=EXCLUDED.freelancer_wallet,sync_hash=EXCLUDED.sync_hash,revision=projects.revision+1 WHERE $7::integer IS NULL OR projects.revision=$7 RETURNING id",
         [
           deployment.rows[0].id,
           id,
@@ -303,12 +315,25 @@ export class BackendService {
           data.description,
           authority.client,
           authority.freelancer,
+          data.expectedRevision ?? null,
+          syncHash,
         ],
       );
+      if (!project.rows[0])
+        throw new ApiError(
+          409,
+          "metadata_changed",
+          "Metadata changed since it was loaded. Refresh before saving.",
+        );
       for (const milestone of data.milestones)
         await sql.query(
-          "INSERT INTO trustlayer.milestones (project_id,onchain_index,description) VALUES ($1,$2,$3) ON CONFLICT (project_id,onchain_index) DO UPDATE SET description=EXCLUDED.description",
-          [project.rows[0].id, milestone.index, milestone.description],
+          "INSERT INTO trustlayer.milestones (project_id,onchain_index,description,name) VALUES ($1,$2,$3,COALESCE($4,'')) ON CONFLICT (project_id,onchain_index) DO UPDATE SET description=EXCLUDED.description,name=COALESCE($4,milestones.name)",
+          [
+            project.rows[0].id,
+            milestone.index,
+            milestone.description,
+            milestone.name ?? null,
+          ],
         );
     });
     return this.project(wallet, scope, id);

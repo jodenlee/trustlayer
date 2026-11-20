@@ -33,6 +33,7 @@ interface ActionProps {
     receipt: ReceiptSummary,
     context: ProtocolWriteContext,
   ) => Promise<void>;
+  closeAfterConfirmed?: boolean;
 }
 const ReviewContext = createContext<{
   busy: boolean;
@@ -50,6 +51,7 @@ export function ReviewedActionProvider({ children }: { children: ReactNode }) {
     details: ActionProps["details"];
     content: ReactNode;
     confirmed?: ActionProps["onConfirmed"];
+    closeAfterConfirmed?: boolean;
   }>();
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
@@ -88,7 +90,7 @@ export function ReviewedActionProvider({ children }: { children: ReactNode }) {
         toast(`${review.title} confirmed.`);
         if (review.confirmed && originalContext) {
           await review.confirmed(receipt, originalContext);
-          setReview(undefined);
+          if (review.closeAfterConfirmed !== false) setReview(undefined);
         }
       }
     } catch (e) {
@@ -115,6 +117,7 @@ export function ReviewedActionProvider({ children }: { children: ReactNode }) {
               details: action.details,
               content: action.children,
               confirmed: action.onConfirmed,
+              closeAfterConfirmed: action.closeAfterConfirmed,
             });
         },
       }}

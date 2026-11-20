@@ -119,7 +119,7 @@ Phase 2E introduced a 156-test blockchain suite, including normal first-mileston
 
 TrustLayer is maintained by one developer with Codex assistance. Follow `AGENTS.md`, use focused changes and review the diff and verification results before committing. Keep credentials, populated environment files, node_modules and cache out of Git. Pushes, merges and public deployments require explicit approval.
 
-Smart-contract verification remains available independently. Phase 3A supplies the interface foundation, Phase 3B adds wallet/deployment verification, Phase 3C integrates escrow and Phase 3D integrates arbitration/staking/rewards. Phase 4A adds PostgreSQL metadata and wallet authentication. Stop after Phase 4A for review; evidence storage and further integration require approval.
+Smart-contract verification remains available independently. Phase 3A supplies the interface foundation, Phase 3B adds wallet/deployment verification, Phase 3C integrates escrow and Phase 3D integrates arbitration/staking/rewards. Phase 4A adds PostgreSQL metadata and wallet authentication. Phase 4B integrates persistent project text and private deliverables/case files. Stop after Phase 4B for review; Phase 5 requires separate approval.
 
 ## Frontend through Phase 3D
 
@@ -128,7 +128,7 @@ npm.cmd --prefix apps/web ci
 npm.cmd run web:dev
 ```
 
-Open http://127.0.0.1:3000. Navigation/sample views work without a blockchain node or wallet. Preview content is explicitly fictional. Connected, verified wallets use real dashboard/project/dispute/juror/history views and explicitly review protocol transactions. Creation text and non-sensitive form drafts are session-only. Approval is separate from escrow funding, fee payment or stake deposit. Votes and evidence hashes are public; no private deliverables are uploaded.
+Open http://127.0.0.1:3000. Navigation/sample views work without a blockchain node or wallet. Preview content is explicitly fictional. Connected, verified wallets use real dashboard/project/dispute/juror/history views and explicitly review protocol transactions. Phase 4B synchronizes descriptive metadata after confirmation when signed in; unsaved drafts remain memory-only. Approval is separate from escrow funding, fee payment or stake deposit. Votes and evidence hashes are public; file bytes stay in private Storage behind authenticated APIs.
 
 For live workflows, start a persistent node on http://127.0.0.1:8545, deploy Phase2D, and export with `TRUSTLAYER_EXPORT_EPHEMERAL=false` using the exact [Phase 3C setup and controlled token-provisioning commands](docs/PHASE3C.md). The checked-in ephemeral verification manifest is intentionally rejected. Dev/build syncs the generated export to ignored public frontend metadata; after re-exporting while the app runs, use `npm.cmd --prefix apps/web run contracts:sync` and Retry verification. No addresses or ABIs are manually copied into page components.
 
@@ -143,7 +143,7 @@ Run `npm.cmd --prefix apps/web run test:unit` for metadata, precision, authoriza
 
 ## Phase 4A backend setup
 
-Next.js route handlers provide durable SIWE sessions, wallet-linked profiles and participant-authorized project metadata APIs using Supabase PostgreSQL. They never override blockchain state. Project creation metadata remains memory-only until a later explicit persistence integration. No evidence uploads are implemented.
+Next.js route handlers provide durable SIWE sessions, wallet-linked profiles and participant-authorized project metadata APIs using Supabase PostgreSQL. They never override blockchain state. Phase 4B now connects these APIs to creation/details/dashboard and adds private file APIs.
 
 ```powershell
 Copy-Item apps/web/.env.example apps/web/.env.local
@@ -153,6 +153,20 @@ npm.cmd run web:dev
 ```
 
 Apply migrations as database owner, then grant `trustlayer_server` to a dedicated runtime login. Connect MetaMask in Settings, explicitly sign in, and edit the separate wallet-linked profile. Local HTTP sign-in uses `next dev`; production requires HTTPS/Secure cookies. See [Phase 4A](docs/PHASE4A.md) for role grants, Supabase/TLS configuration, exact API contracts, verification results and disposable database reset instructions. No hosted database connection is claimed without credentials. Automated database tests use an isolated embedded PostgreSQL engine; `npx.cmd hardhat run apps/web/scripts/verify-backend-workflow.ts` also checks metadata authorization against actual production contracts on an isolated EVM. Existing local blockchain persistence issues remain deferred to Phase 5.
+
+## Phase 4B metadata and private Storage
+
+See [Phase 4B](docs/PHASE4B.md) for the additive migration, API inventory, exact private-bucket/environment setup, authorization/retention rules, failure recovery and manual verification. Preserve the existing populated `.env.local`; add only the server-only Storage variables shown in `.env.example`. Never copy the example over working credentials. The hosted Phase 4B SQL migration was applied successfully; hosted object upload/download still requires Storage configuration and verification.
+
+```powershell
+npm.cmd --prefix apps/web run db:migrate -- --check
+npm.cmd --prefix apps/web run db:migrate
+npm.cmd run web:dev
+```
+
+Sign in separately from wallet connection. Metadata synchronization follows the actual creation receipt; retry an existing project's metadata after backend failure without another chain transaction. Freelancer deliverables and primary opening/response files use SHA-256 exact-byte hashes accepted by the unchanged bytes32 interfaces. Supplemental evidence stays off-chain and closes strictly at the on-chain response deadline. Participants and assigned jurors use authenticated integrity-checked downloads; unrelated wallets are denied. All uploaded objects are retained, including unlinked drafts, to avoid racing pending chain references. No malware scanning or end-to-end encryption is provided.
+
+Run `npx.cmd hardhat run apps/web/scripts/verify-files-workflow.ts` in addition to the three existing EVM verification scripts. It uses actual contracts with isolated SQL/byte storage, never hosted credentials. Keep the existing privileged local database URL working; dedicated runtime-role separation and broader hardening remain Phase 5 review items. Stop here for review.
 
 ## Limits and security
 

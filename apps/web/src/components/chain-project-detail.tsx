@@ -37,6 +37,13 @@ import { LiveWalletCard } from "./live-wallet";
 import { TransactionFeedback } from "./transaction-feedback";
 import { ChainHistory } from "./chain-history";
 import { ProjectArbitration } from "./project-arbitration";
+import {
+  usePersistentProject,
+  ProjectMetadataEditor,
+} from "./project-metadata";
+import { PrivateFiles, fileAssociationUrl } from "./private-files";
+import { backendRequest } from "@/lib/auth-client";
+import type { FileRecord } from "@/lib/files";
 
 const labels: Record<EscrowAction, string> = {
   approveToken: "Approve exact mUSD allowance",
@@ -59,19 +66,40 @@ export function ChainProjectDetail({ id }: { id: bigint }) {
     milestoneIndex?: number;
   }>();
   const [evidence, setEvidence] = useState("");
+  const [selectedFile, setSelectedFile] = useState<{
+    file: FileRecord;
+    scope: string;
+  }>();
   const [error, setError] = useState("");
   const view = read.view;
   const config = read.deployment.data;
   const project = view?.project;
   const account = read.deployment.address;
-  const metadata =
-    project && config
+  const localMetadata =
+    project &&
+    config &&
+    account &&
+    [project.client.toLowerCase(), project.freelancer.toLowerCase()].includes(
+      account.toLowerCase(),
+    )
       ? session.metadata(
           deploymentScope(config.manifest),
           id,
           project.metadataHash,
         )
       : undefined;
+  const persistent = usePersistentProject(config?.manifest, id, !!project);
+  const metadata = persistent.project
+    ? {
+        title: persistent.project.title,
+        description: persistent.project.description,
+        milestones: project!.milestones.map(
+          (_, i) =>
+            persistent.project!.milestones.find((m) => m.onchain_index === i)
+              ?.name || `Milestone ${i + 1}`,
+        ),
+      }
+    : localMetadata;
   const busy = tx.isBusy();
   const sameReviewContext =
     !!config &&
@@ -141,6 +169,28 @@ export function ChainProjectDetail({ id }: { id: bigint }) {
       );
       if (receipt?.status === "success") {
         toast(`${labels[kind]} confirmed.`);
+        if (
+          kind === "submit" &&
+          config &&
+          selectedFile &&
+          selectedFile.scope === deploymentScope(config.manifest) &&
+          selectedFile.file.uploader === account?.toLowerCase() &&
+          selectedFile.file.content_hash === evidence.toLowerCase() &&
+          selectedFile.file.project_id === String(id) &&
+          selectedFile.file.milestone_index === reviewContext!.milestoneIndex
+        ) {
+          try {
+            await backendRequest(
+              fileAssociationUrl(config.manifest, selectedFile.file.id),
+              "POST",
+              { transactionHash: receipt.transactionHash },
+            );
+          } catch (e) {
+            setError(
+              `Milestone confirmed on-chain. File association needs a separate retry: ${e instanceof Error ? e.message : "Backend unavailable."} Do not submit again.`,
+            );
+          }
+        }
         setEvidence("");
       }
     } catch (e) {
@@ -158,7 +208,7 @@ export function ChainProjectDetail({ id }: { id: bigint }) {
         eyebrow="ON-CHAIN AGREEMENT"
         description={
           metadata
-            ? `${metadata.description} · Descriptive metadata exists only in this browser session.`
+            ? `${metadata.description} · ${persistent.project ? "Saved project metadata." : "Descriptive metadata exists only in this browser session."}`
             : "Titles and descriptions are not stored on-chain. Session metadata is unavailable for this project."
         }
       />
@@ -203,6 +253,16 @@ export function ChainProjectDetail({ id }: { id: bigint }) {
       )}
       {view && project && account && (
         <>
+          {projectRole(project, account) !== "Viewer" && config && (
+            <ProjectMetadataEditor
+              key={`${deploymentScope(config.manifest)}:${account}:${persistent.project?.revision ?? "new"}`}
+              manifest={config.manifest}
+              id={id}
+              project={persistent.project}
+              fallback={localMetadata}
+              count={project.milestoneCount}
+            />
+          )}
           <div className="detail-grid">
             <div className="space-y-5">
               <Card>
@@ -351,6 +411,23 @@ export function ChainProjectDetail({ id }: { id: bigint }) {
                               Public evidence hash: {m.evidenceHash}
                             </p>
                           )}
+                          {config && (
+                            <PrivateFiles
+                              key={`${deploymentScope(config.manifest)}:${account}:${index}`}
+                              manifest={config.manifest}
+                              projectId={id}
+                              index={index}
+                              category="deliverable"
+                              canUpload={current && available.submit}
+                              onSelected={(file) => {
+                                setEvidence(file.content_hash);
+                                setSelectedFile({
+                                  file,
+                                  scope: deploymentScope(config.manifest),
+                                });
+                              }}
+                            />
+                          )}
                           {m.state === 2 && (
                             <p className="info-note mt-4">
                               <LockKeyhole size={14} />
@@ -371,7 +448,7 @@ export function ChainProjectDetail({ id }: { id: bigint }) {
                               <Field
                                 id="submission-hash"
                                 label="Non-sensitive content hash"
-                                hint="Only this 32-byte hash is public. Never paste private deliverables. Secure uploads and evidence storage come in a later backend phase."
+                                hint="Only this 32-byte hash is public. Upload privately to use a verified SHA-256 content hash; never paste private file contents."
                               >
                                 <Input
                                   id="submission-hash"

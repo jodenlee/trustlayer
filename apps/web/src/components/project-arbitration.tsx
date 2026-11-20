@@ -19,6 +19,12 @@ import { ReviewedAction } from "./reviewed-action";
 import { Field, Input } from "./ui";
 import { Money } from "./money";
 import { useWorkflowInput } from "./workflow-provider";
+import { useState } from "react";
+import { PrivateFiles, fileAssociationUrl } from "./private-files";
+import { backendRequest } from "@/lib/auth-client";
+import type { FileRecord } from "@/lib/files";
+import { usePreview } from "./providers";
+import { deploymentScope } from "@/lib/blockchain/session";
 
 export function ProjectArbitration({
   project,
@@ -29,6 +35,11 @@ export function ProjectArbitration({
 }) {
   const read = useOpening(project, index);
   const router = useRouter();
+  const { toast } = usePreview();
+  const [attachment, setAttachment] = useState<{
+    file: FileRecord;
+    scope: string;
+  }>();
   const [evidence, setEvidence] = useWorkflowInput(
     read.deployment.data?.manifest,
     read.deployment.address,
@@ -78,7 +89,7 @@ export function ProjectArbitration({
       <Field
         id={`dispute-evidence-${index}`}
         label="Opening evidence hash"
-        hint="A nonzero public bytes32 reference only. Confidential files stay off-chain; private evidence management comes later."
+        hint="A nonzero public bytes32 reference. Upload privately to use a verified SHA-256 content hash; file bytes stay off-chain."
       >
         <Input
           id={`dispute-evidence-${index}`}
@@ -87,6 +98,21 @@ export function ProjectArbitration({
           placeholder="0x followed by 64 hexadecimal characters"
         />
       </Field>
+      <PrivateFiles
+        key={`${deploymentScope(read.deployment.data!.manifest)}:${read.deployment.address}`}
+        manifest={read.deployment.data!.manifest}
+        projectId={project.id}
+        index={index}
+        category="opening"
+        canUpload
+        onSelected={(file) => {
+          setEvidence(file.content_hash);
+          setAttachment({
+            file,
+            scope: deploymentScope(read.deployment.data!.manifest),
+          });
+        }}
+      />
       {view.balance < DISPUTE_FEE && (
         <p role="alert" className="form-error">
           Insufficient mUSD: the opener needs 15 mUSD to pay the fee.
@@ -121,6 +147,28 @@ export function ProjectArbitration({
                   index,
                   context.account,
                 );
+                if (
+                  attachment?.scope === deploymentScope(context.manifest) &&
+                  attachment.file.content_hash === evidence.toLowerCase() &&
+                  attachment.file.project_id === String(project.id) &&
+                  attachment.file.milestone_index === index &&
+                  attachment.file.uploader === context.account.toLowerCase()
+                ) {
+                  try {
+                    await backendRequest(
+                      fileAssociationUrl(context.manifest, attachment.file.id),
+                      "POST",
+                      {
+                        transactionHash: receipt.transactionHash,
+                        disputeId: String(id),
+                      },
+                    );
+                  } catch {
+                    toast(
+                      "Dispute confirmed on-chain. Private evidence association needs a separate retry using this receipt; do not open another dispute.",
+                    );
+                  }
+                }
                 router.push(`/disputes/${id}`);
               }
         }

@@ -35,15 +35,18 @@ import { LiveWalletCard } from "./live-wallet";
 import { describeError } from "@/lib/blockchain/errors";
 import { SessionHistory } from "./chain-history";
 import { ChainDisputes } from "./chain-disputes";
+import { useProjectTitles } from "./project-metadata";
 
 export function ChainProjectTable({
   projects,
   scope,
   account,
+  titles,
 }: {
   projects: ChainProject[];
   scope: string;
   account: `0x${string}`;
+  titles?: Map<string, string | undefined>;
 }) {
   const session = useWorkflowSession();
   return (
@@ -57,7 +60,8 @@ export function ChainProjectTable({
           render: (p) => (
             <div>
               <Link className="project-name" href={`/projects/${p.id}`}>
-                {session.metadata(scope, p.id, p.metadataHash)?.title ??
+                {titles?.get(String(p.id)) ??
+                  session.metadata(scope, p.id, p.metadataHash)?.title ??
                   `Project #${p.id}`}
               </Link>
               <p className="project-subtitle">
@@ -100,10 +104,14 @@ export function ChainProjects({ dashboard = false }: { dashboard?: boolean }) {
     ? deploymentScope(deployment.data.manifest)
     : "";
   const items = data.projects;
+  const titles = useProjectTitles(
+    deployment.ready ? deployment.data?.manifest : undefined,
+    items.map((p) => p.id),
+  );
   const rows = items.filter(
     (p) =>
       (filter === "All projects" || PROJECT_STATES[p.state] === filter) &&
-      `${p.id} ${session.metadata(scope, p.id, p.metadataHash)?.title ?? ""} ${p.client} ${p.freelancer}`
+      `${p.id} ${titles.get(String(p.id)) ?? session.metadata(scope, p.id, p.metadataHash)?.title ?? ""} ${p.client} ${p.freelancer}`
         .toLowerCase()
         .includes(search.toLowerCase()),
   );
@@ -121,7 +129,7 @@ export function ChainProjects({ dashboard = false }: { dashboard?: boolean }) {
     <>
       <PageHeading
         title={dashboard ? "Your workspace" : "Projects"}
-        description="Your connected wallet’s on-chain agreements. Descriptive metadata is session-only."
+        description="Your connected wallet’s on-chain agreements. Sign in to load saved descriptive metadata."
         action={
           <ButtonLink href="/projects/new">
             <Plus size={16} />
@@ -238,6 +246,7 @@ export function ChainProjects({ dashboard = false }: { dashboard?: boolean }) {
           </div>
         ) : rows.length ? (
           <ChainProjectTable
+            titles={titles}
             projects={rows}
             scope={scope}
             account={deployment.address!}

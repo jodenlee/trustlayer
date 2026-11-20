@@ -13,8 +13,11 @@ import { authOrigin, databaseConfig } from "./config";
 import { chainAuthority } from "./chain";
 import { BackendService } from "./service";
 import { createApi } from "./api";
+import { FileService } from "./file-service";
+import { storageConfig, supabaseStorage } from "./storage";
 
 let service: BackendService | undefined;
+let files: FileService | undefined;
 function backend() {
   if (!service) {
     const origin = authOrigin();
@@ -47,4 +50,6 @@ export const handleApi = createApi({
   origin: () => authOrigin(),
   secure: process.env.NODE_ENV === "production",
   configured: () => !!process.env.DATABASE_URL,
+  files: () =>
+    (files ??= new FileService(backend(), supabaseStorage(storageConfig()))),
 });

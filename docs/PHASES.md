@@ -31,7 +31,7 @@ Source of truth: TrustLayer Solution Design Document v1.0 (2026-11-16).
 
 ## Phase 4 — backend and off-chain foundation
 - Phase 4A: Next.js server route handlers, private Supabase/PostgreSQL schema, durable SIWE nonces/sessions, own-profile editing, verified-participant project metadata APIs and separate frontend sign-in. Existing transaction and memory-only project workflows remain intact. See [Phase 4A](PHASE4A.md) for setup, verification and limitations. Stop after Phase 4A for review.
-- Phase 4B and later: private evidence storage/access and further metadata integration remain unimplemented and require approval.
+- Phase 4B: persistent project/milestone text integrated with receipt-confirmed creation and safe metadata retry; private Supabase Storage adapter, immutable SHA-256 deliverables/opening/response associations, off-chain deadline-bound supplemental evidence and participant/assigned-juror downloads. The additive hosted SQL migration is applied; hosted Storage configuration/manual verification remains required. See [Phase 4B](PHASE4B.md). Stop after Phase 4B for review.
 
 ## Phase 5 — final integration, hardening and demo (deferred)
 - Edge cases, test coverage, manual walkthrough, transaction history
@@ -39,4 +39,4 @@ Source of truth: TrustLayer Solution Design Document v1.0 (2026-11-16).
 - White-paper claim-to-code review and presentation rehearsal
 
 ## Not implemented yet
-Juror penalties, migration of old deployed funds, refund/treasury administration frontend actions, private evidence API/storage, automatic persistence of project creation drafts, reorg-aware event index, local blockchain persistence/recovery, production security audit, and optional Sepolia deployment. Phase 4A implements the backend/schema/SIWE foundation; hosted Supabase connectivity still requires external configuration. Fixed Phase 2D juror rewards and treasury remain unchanged. Stop after Phase 4A; Phase 4B and Phase 5 require separate approval.
+Juror penalties, migration of old deployed funds, refund/treasury administration frontend actions, persistence of unconfirmed drafts, reorg-aware event index, local blockchain persistence/recovery, malware scanning, runtime-role separation, production security audit, and optional Sepolia deployment. Phase 4B implements private file APIs and confirmed project metadata synchronization; hosted Storage configuration/manual verification remains external. Fixed Phase 2D juror rewards and treasury remain unchanged. Stop after Phase 4B; Phase 5 requires separate approval.

@@ -159,7 +159,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <span>
                   {" "}
                   {liveWorkspace
-                    ? " · Verified account data only. Metadata and client transaction tracking are session-only."
+                    ? " · Verified account data. Sign in for saved metadata and private files. Client transaction tracking stays in this session."
                     : ` · ${sample ? "Fictional sample data" : "Empty workspace"}. Live wallet data is labeled separately; sample actions stay disabled.`}
                 </span>
               </p>

@@ -1,18 +1,24 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { BackendService } from "../src/lib/server/service";
-import { createApi } from "../src/lib/server/api";
+import { createApi, type Endpoint } from "../src/lib/server/api";
+import { FileService } from "../src/lib/server/file-service";
+import type { PrivateStorage } from "../src/lib/server/storage";
 import type { ChainAuthority } from "../src/lib/server/chain";
 import { testDatabase } from "./database";
 
 /** Test-only HTTP bridge: actual production SIWE/cookies/SQL, never hosted data. */
-export async function authBackend(origin: string) {
+export async function authBackend(
+  origin: string,
+  options: { chain?: ChainAuthority; storage?: PrivateStorage } = {},
+) {
   const database = await testDatabase();
   let offset = 0;
   let failure = false;
   let expectedOrigin = origin;
   let sessionReads = 0;
   let logouts = 0;
+  let metadataFailure = false;
   const chain: ChainAuthority = {
     project: async () => {
       throw new Error("Unused by auth tests");
@@ -27,7 +33,7 @@ export async function authBackend(origin: string) {
   const service = new BackendService(
     database.db,
     origin,
-    chain,
+    options.chain ?? chain,
     () => new Date(Date.now() + offset),
   );
   const api = createApi({
@@ -37,16 +43,54 @@ export async function authBackend(origin: string) {
     },
     origin: () => expectedOrigin,
     secure: false,
+    files: options.storage
+      ? () => new FileService(service, options.storage!)
+      : undefined,
   });
   const server = createServer(async (req, res) => {
+    const pathname = new URL(req.url!, origin).pathname;
+    const parts = pathname.split("/");
     const endpoint =
-      req.url === "/api/profile" ? "profile" : req.url?.split("/").pop();
+      parts[2] === "projects"
+        ? parts[4] === "milestones"
+          ? "milestone"
+          : "project"
+        : parts[2] === "files"
+          ? parts[4] === "associate"
+            ? "fileAssociate"
+            : parts[4] === "verify"
+              ? "fileVerify"
+              : parts[3]
+                ? "file"
+                : "files"
+          : parts[parts.length - 1];
     if (
-      !["profile", "nonce", "verify", "session", "logout"].includes(
-        endpoint ?? "",
-      )
+      ![
+        "profile",
+        "nonce",
+        "verify",
+        "session",
+        "logout",
+        "project",
+        "milestone",
+        "files",
+        "file",
+        "fileAssociate",
+        "fileVerify",
+      ].includes(endpoint ?? "")
     ) {
       res.writeHead(404).end();
+      return;
+    }
+    if (metadataFailure && endpoint === "project" && req.method === "PUT") {
+      res.writeHead(503, { "Content-Type": "application/json" }).end(
+        JSON.stringify({
+          error: {
+            code: "backend_unavailable",
+            message: "Isolated metadata database unavailable",
+          },
+        }),
+      );
       return;
     }
     if (endpoint === "session") sessionReads++;
@@ -63,8 +107,10 @@ export async function authBackend(origin: string) {
       ...(chunks.length ? { body: Buffer.concat(chunks) } : {}),
     });
     const response = await api(
-      endpoint as "profile" | "nonce" | "verify" | "session" | "logout",
+      endpoint as Endpoint,
       request,
+      parts[3],
+      parts[5],
     );
     res.statusCode = response.status;
     response.headers.forEach((value, name) => {
@@ -80,6 +126,10 @@ export async function authBackend(origin: string) {
   });
   return {
     url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    service,
+    failMetadata: (value = true) => {
+      metadataFailure = value;
+    },
     reads: () => sessionReads,
     logouts: () => logouts,
     expire: () => {

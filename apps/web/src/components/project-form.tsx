@@ -20,9 +20,12 @@ import { useWorkflowSession } from "./workflow-provider";
 import { usePreview } from "./providers";
 import { TransactionFeedback } from "./transaction-feedback";
 import { describeError, IntegrationError } from "@/lib/blockchain/errors";
+import { useBackendAuth } from "./auth-provider";
+import { syncConfirmedProject } from "@/lib/metadata-client";
 
 interface DraftMilestone {
   title: string;
+  description?: string;
   amount: string;
   due: string;
 }
@@ -37,6 +40,7 @@ export function ProjectForm() {
   const session = useWorkflowSession();
   const router = useRouter();
   const { toast } = usePreview();
+  const auth = useBackendAuth();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [freelancer, setFreelancer] = useState("");
@@ -47,6 +51,7 @@ export function ProjectForm() {
   const [review, setReview] = useState(false);
   const [reviewing, setReviewing] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [synchronizing, setSynchronizing] = useState(false);
   const creatingRef = useRef(false);
   const dialogFeedback = useRef<HTMLDivElement>(null);
   const [creationConfirmed, setCreationConfirmed] = useState(false);
@@ -176,7 +181,27 @@ export function ProjectForm() {
         id,
         prepared.metadata,
       );
-      toast(`Project #${id} created. Funding is a separate step.`);
+      let synchronized = false;
+      if (auth.session?.address === account.toLowerCase()) {
+        setSynchronizing(true);
+        const sync = await syncConfirmedProject(config.manifest, id, {
+          title: draft.title,
+          description: draft.description,
+          milestones: draft.milestones.map((m, index) => ({
+            index,
+            name: m.title,
+            description: m.description?.trim() || m.title,
+          })),
+        });
+        synchronized = sync.synced;
+      }
+      toast(
+        auth.session
+          ? synchronized
+            ? `Project #${id} created on-chain. Metadata synchronized. Funding is a separate step.`
+            : `Project #${id} created on-chain. Metadata not synchronized; retry in Project metadata. Do not create another project.`
+          : `Project #${id} created. Funding is a separate step.`,
+      );
       setReview(false);
       router.push(`/projects/${id}`);
     } catch (e) {
@@ -190,6 +215,7 @@ export function ProjectForm() {
     } finally {
       creatingRef.current = false;
       setCreating(false);
+      setSynchronizing(false);
     }
   }
   return (
@@ -200,7 +226,7 @@ export function ProjectForm() {
       </Link>
       <PageHeading
         title="Start with a clear agreement"
-        description="Define the work and milestones. Titles and descriptions are session-only; the contract stores their metadata hash."
+        description="Define the work and milestones. Creation is on-chain; descriptive text is synchronized separately after confirmation when signed in."
       />
       {!review && <TransactionFeedback state={tx.state} />}
       <form noValidate onSubmit={(event) => void onSubmit(event)}>
@@ -290,6 +316,20 @@ export function ProjectForm() {
                         value={m.title}
                         maxLength={120}
                         onChange={(e) => update(i, "title", e.target.value)}
+                      />
+                    </Field>
+                    <Field
+                      id={`milestone-${i}-description`}
+                      label="Milestone description (optional)"
+                    >
+                      <textarea
+                        className="input"
+                        id={`milestone-${i}-description`}
+                        maxLength={4000}
+                        value={m.description ?? ""}
+                        onChange={(e) =>
+                          update(i, "description", e.target.value)
+                        }
                       />
                     </Field>
                     <div className="field-grid mt-4">
@@ -452,13 +492,15 @@ export function ProjectForm() {
           }
           onClick={() => void createProject()}
         >
-          {creating
-            ? "Creating project…"
-            : creationConfirmed
-              ? "Project confirmed · check Transactions"
-              : deployment.ready
-                ? "Create project in wallet"
-                : "Create project · not enabled"}
+          {synchronizing
+            ? "Project confirmed · synchronizing metadata…"
+            : creating
+              ? "Creating project…"
+              : creationConfirmed
+                ? "Project confirmed · check Transactions"
+                : deployment.ready
+                  ? "Create project in wallet"
+                  : "Create project · not enabled"}
         </Button>
         {deployment.ready && !sameReviewContext && (
           <p className="small text-muted mt-3">

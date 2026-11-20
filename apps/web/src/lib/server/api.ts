@@ -2,6 +2,9 @@ import { ZodError } from "zod";
 import type { BackendService } from "./service";
 import { NONCE_SECONDS, SESSION_SECONDS } from "./service";
 import { ApiError } from "./errors";
+import { z } from "zod";
+import type { FileService } from "./file-service";
+import { limitedBytes } from "./storage";
 import {
   nonceSchema,
   profileSchema,
@@ -12,7 +15,25 @@ import {
 } from "./validation";
 
 export type Endpoint =
-  "nonce" | "verify" | "session" | "logout" | "profile" | "project";
+  | "nonce"
+  | "verify"
+  | "session"
+  | "logout"
+  | "profile"
+  | "project"
+  | "files"
+  | "file"
+  | "fileAssociate"
+  | "fileVerify"
+  | "milestone";
+const targetSchema = scopeSchema.extend({
+  projectId: uint256Schema,
+  milestoneIndex: z.coerce.number().int().min(0).max(4),
+  disputeId: uint256Schema.optional(),
+});
+const uploadSchema = targetSchema.extend({
+  category: z.enum(["deliverable", "opening", "response", "evidence"]),
+});
 function cookieValue(request: Request, name: string) {
   const value = request.headers
     .get("cookie")
@@ -63,8 +84,14 @@ export function createApi(options: {
   origin: () => string;
   secure: boolean;
   configured?: () => boolean;
+  files?: () => FileService;
 }) {
-  return async (endpoint: Endpoint, request: Request, projectId?: string) => {
+  return async (
+    endpoint: Endpoint,
+    request: Request,
+    projectId?: string,
+    milestoneIndex?: string,
+  ) => {
     const headers = new Headers({
       "Cache-Control": "no-store",
       Vary: "Cookie",
@@ -76,13 +103,21 @@ export function createApi(options: {
     try {
       const method = request.method;
       const allowed =
-        endpoint === "profile"
-          ? ["GET", "PATCH"]
-          : endpoint === "project"
-            ? ["GET", "PUT"]
-            : endpoint === "session"
-              ? ["GET"]
-              : ["POST"];
+        endpoint === "files"
+          ? ["GET", "POST"]
+          : endpoint === "file"
+            ? ["GET", "DELETE"]
+            : endpoint === "fileAssociate"
+              ? ["POST"]
+              : endpoint === "milestone" || endpoint === "fileVerify"
+                ? ["GET"]
+                : endpoint === "profile"
+                  ? ["GET", "PATCH"]
+                  : endpoint === "project"
+                    ? ["GET", "PUT"]
+                    : endpoint === "session"
+                      ? ["GET"]
+                      : ["POST"];
       if (!allowed.includes(method)) {
         headers.set("Allow", allowed.join(", "));
         throw new ApiError(405, "method_not_allowed", "Method not allowed.");
@@ -164,6 +199,116 @@ export function createApi(options: {
           "unauthenticated",
           "Sign in with your connected wallet first.",
         );
+      if (["files", "file", "fileAssociate", "fileVerify"].includes(endpoint)) {
+        if (!options.files)
+          throw new ApiError(
+            503,
+            "storage_setup",
+            "Private storage is not configured.",
+          );
+        const files = options.files();
+        const params = Object.fromEntries(new URL(request.url).searchParams);
+        if (endpoint === "files") {
+          if (method === "GET")
+            return reply({
+              maxBytes: files.storage.maxBytes,
+              files: await files.list(
+                session.address,
+                targetSchema.parse(params),
+              ),
+            });
+          const input = uploadSchema.parse(params);
+          const key = z
+            .string()
+            .uuid()
+            .parse(request.headers.get("idempotency-key"));
+          const hash = z
+            .string()
+            .regex(/^0x[0-9a-f]{64}$/)
+            .parse(request.headers.get("x-content-sha256"));
+          let filename = "";
+          try {
+            filename = decodeURIComponent(
+              request.headers.get("x-file-name") ?? "",
+            );
+          } catch {
+            throw new ApiError(400, "filename", "Invalid filename encoding.");
+          }
+          if (!filename || filename.length > 500)
+            throw new ApiError(
+              400,
+              "filename",
+              "A bounded filename is required.",
+            );
+          // Validate session, identifiers, and role before accepting a body.
+          const authority = await files.context(input);
+          if (
+            session.address !== authority.client &&
+            session.address !== authority.freelancer
+          )
+            throw new ApiError(
+              403,
+              "file_role",
+              "Only project participants may upload.",
+            );
+          const bytes = await limitedBytes(
+            request.body,
+            files.storage.maxBytes,
+          );
+          return reply({
+            file: await files.upload(
+              session.address,
+              input,
+              input.category,
+              key,
+              filename,
+              request.headers.get("content-type") ?? "",
+              bytes,
+              hash,
+            ),
+          });
+        }
+        const id = z.string().uuid().parse(projectId);
+        const scope = scopeSchema.parse(params);
+        if (endpoint === "fileVerify") {
+          const result = await files.download(session.address, scope, id, true);
+          return reply({
+            file: result.file,
+            integrityVerified: true,
+            algorithm: "SHA-256",
+          });
+        }
+        if (endpoint === "fileAssociate") {
+          const input = z
+            .object({
+              transactionHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
+              disputeId: uint256Schema.optional(),
+            })
+            .strict()
+            .parse(await body(request));
+          return reply({
+            file: await files.associate(
+              session.address,
+              scope,
+              id,
+              input.transactionHash.toLowerCase() as `0x${string}`,
+              input.disputeId,
+            ),
+          });
+        }
+        if (method === "DELETE")
+          return reply(await files.remove(session.address, scope, id));
+        const result = await files.download(session.address, scope, id);
+        headers.set("Content-Type", "application/octet-stream");
+        headers.set(
+          "Content-Disposition",
+          `attachment; filename="${result.file.filename.replace(/"/g, "_")}"`,
+        );
+        headers.set("Content-Length", String(result.bytes!.length));
+        headers.set("X-Content-SHA256", result.file.content_hash);
+        headers.set("Content-Security-Policy", "default-src 'none'; sandbox");
+        return new Response(Buffer.from(result.bytes!), { headers });
+      }
       if (endpoint === "profile")
         return reply({
           profile:
@@ -177,6 +322,26 @@ export function createApi(options: {
       const params = new URL(request.url).searchParams;
       const scope = scopeSchema.parse(Object.fromEntries(params));
       const id = uint256Schema.parse(projectId);
+      if (endpoint === "milestone") {
+        const index = z.coerce
+          .number()
+          .int()
+          .min(0)
+          .max(4)
+          .parse(milestoneIndex);
+        await service.chain.milestone(scope, id, index, session.address);
+        const project = await service.project(session.address, scope, id);
+        const milestone = project.milestones.find(
+          (m) => m.onchain_index === index,
+        );
+        if (!milestone)
+          throw new ApiError(
+            404,
+            "metadata_missing",
+            "Milestone metadata has not been saved.",
+          );
+        return reply({ milestone });
+      }
       return reply({
         project:
           method === "GET"

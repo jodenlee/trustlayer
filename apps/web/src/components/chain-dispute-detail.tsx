@@ -30,9 +30,20 @@ import { ReviewedAction } from "./reviewed-action";
 import { Money } from "./money";
 import { ChainHistory } from "./chain-history";
 import { useWorkflowInput } from "./workflow-provider";
+import { useState } from "react";
+import { PrivateFiles, fileAssociationUrl } from "./private-files";
+import { backendRequest } from "@/lib/auth-client";
+import type { FileRecord } from "@/lib/files";
+import { deploymentScope } from "@/lib/blockchain/session";
+import { usePreview } from "./providers";
 
 export function ChainDisputeDetail({ id }: { id: bigint }) {
   const read = useCaseDetail(id);
+  const [attachment, setAttachment] = useState<{
+    file: FileRecord;
+    scope: string;
+  }>();
+  const { toast } = usePreview();
   const [response, setResponse] = useWorkflowInput(
     read.deployment.data?.manifest,
     read.deployment.address,
@@ -183,7 +194,7 @@ export function ChainDisputeDetail({ id }: { id: bigint }) {
           <Card>
             <CardHeading
               title="Evidence references"
-              description="Public on-chain hashes. Private files and access-controlled evidence storage are deferred."
+              description="Public on-chain hashes and separately authorized private attachments."
             />
             <div className="card-body pt-0! space-y-3">
               <p className="small text-muted">Opening hash</p>
@@ -198,6 +209,40 @@ export function ChainDisputeDetail({ id }: { id: bigint }) {
                 A hash alone does not make the referenced evidence available or
                 private. Do not enter confidential deliverables or personal
                 information.
+              </p>
+              {["Client", "Freelancer", "Juror"].includes(role) && (
+                <PrivateFiles
+                  key={`${deploymentScope(read.deployment.data!.manifest)}:${account}:${id}`}
+                  manifest={read.deployment.data!.manifest}
+                  projectId={d.projectId}
+                  index={Number(d.milestoneIndex)}
+                  disputeId={id}
+                  category={allowed.respond ? "response" : "evidence"}
+                  canUpload={
+                    role !== "Juror" &&
+                    d.status === 1 &&
+                    view.now < d.responseDeadline
+                  }
+                  onSelected={
+                    allowed.respond
+                      ? (file) => {
+                          setResponse(file.content_hash);
+                          setAttachment({
+                            file,
+                            scope: deploymentScope(
+                              read.deployment.data!.manifest,
+                            ),
+                          });
+                        }
+                      : undefined
+                  }
+                />
+              )}
+              <p className="small text-muted">
+                Additional off-chain evidence is append-only until the response
+                deadline. Assigned jurors and participants retain read access
+                after closure. Only the opening and single response hashes are
+                recorded by the contract.
               </p>
               {allowed.respond && (
                 <>
@@ -214,11 +259,44 @@ export function ChainDisputeDetail({ id }: { id: bigint }) {
                   </Field>
                   <ReviewedAction
                     title="Record response hash"
+                    closeAfterConfirmed={false}
                     details={details}
                     disabled={read.isFetching || !validEvidenceHash(response)}
                     submit={(context) =>
                       executeCaseAction(context, "respond", id, response)
                     }
+                    onConfirmed={async (receipt, context) => {
+                      if (
+                        attachment?.scope ===
+                          deploymentScope(context.manifest) &&
+                        attachment.file.content_hash ===
+                          response.toLowerCase() &&
+                        attachment.file.project_id === String(d.projectId) &&
+                        attachment.file.milestone_index ===
+                          Number(d.milestoneIndex) &&
+                        attachment.file.dispute_id === String(id) &&
+                        attachment.file.uploader ===
+                          context.account.toLowerCase()
+                      ) {
+                        try {
+                          await backendRequest(
+                            fileAssociationUrl(
+                              context.manifest,
+                              attachment.file.id,
+                            ),
+                            "POST",
+                            {
+                              transactionHash: receipt.transactionHash,
+                              disputeId: String(id),
+                            },
+                          );
+                        } catch {
+                          toast(
+                            "Response confirmed on-chain. Retry the private file association separately; do not resubmit the response.",
+                          );
+                        }
+                      }
+                    }}
                   >
                     <p>
                       Record this public reference once. This does not upload

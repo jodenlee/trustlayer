@@ -43,11 +43,13 @@ export const projectSchema = z
   .object({
     title: z.string().trim().min(1).max(160),
     description: z.string().trim().min(1).max(10000),
+    expectedRevision: z.number().int().positive().optional(),
     milestones: z
       .array(
         z
           .object({
             index: z.number().int().min(0).max(4),
+            name: z.string().trim().min(1).max(160).optional(),
             description: z.string().trim().min(1).max(4000),
           })
           .strict(),

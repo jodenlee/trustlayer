@@ -59,7 +59,12 @@ export interface ProjectDraft {
   title: string;
   description: string;
   freelancer: string;
-  milestones: { title: string; amount: string; due: string }[];
+  milestones: {
+    title: string;
+    description?: string;
+    amount: string;
+    due: string;
+  }[];
 }
 export interface SessionMetadata {
   title: string;
