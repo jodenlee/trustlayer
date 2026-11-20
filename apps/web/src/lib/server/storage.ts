@@ -170,8 +170,10 @@ export function supabaseStorage(
     if (!response.ok)
       throw new ApiError(
         503,
-        "storage_setup",
-        "Private bucket configuration could not be verified.",
+        response.status === 401 || response.status === 403
+          ? "storage_auth"
+          : "storage_setup",
+        `Private bucket configuration could not be verified (Storage HTTP ${response.status}). Check the server credentials and private bucket configuration.`,
       );
     const bucket = await response.json();
     if (bucket.id !== config.bucket || bucket.public !== false)
@@ -202,6 +204,19 @@ export function supabaseStorage(
       await checked(path);
       const r = await call(`object/authenticated/${config.bucket}/${path}`);
       if (r.status === 404) return null;
+      if (r.status === 400) {
+        // Hosted Storage's legacy object-not-found envelope uses HTTP 400.
+        // Do not treat arbitrary 400s or authorization errors as missing bytes.
+        const body = await limitedBytes(r.body, 4096)
+          .then((b) => JSON.parse(Buffer.from(b).toString()))
+          .catch(() => null);
+        if (
+          String(body?.statusCode) === "404" &&
+          body?.error === "not_found" &&
+          body?.message === "Object not found"
+        )
+          return null;
+      }
       if (!r.ok)
         throw new ApiError(
           503,

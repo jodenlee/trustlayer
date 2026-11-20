@@ -14,6 +14,7 @@ import { WalletDialog } from "./wallet";
 import { WorkflowProvider } from "./workflow-provider";
 import { ReviewedActionProvider } from "./reviewed-action";
 import { AuthProvider } from "./auth-provider";
+import { FileDraftProvider } from "./file-draft-provider";
 
 interface PreviewContext {
   sample: boolean;
@@ -36,7 +37,9 @@ export function Providers({ children }: { children: ReactNode }) {
     <BlockchainProvider>
       <AuthProvider>
         <WorkflowProvider>
-          <PreviewProvider>{children}</PreviewProvider>
+          <FileDraftProvider>
+            <PreviewProvider>{children}</PreviewProvider>
+          </FileDraftProvider>
         </WorkflowProvider>
       </AuthProvider>
     </BlockchainProvider>

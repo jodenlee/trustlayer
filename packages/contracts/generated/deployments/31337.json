@@ -5,10 +5,10 @@
   "deploymentId": "chain-31337",
   "rpcUrl": "http://127.0.0.1:8545/",
   "ephemeral": false,
-  "verifiedAt": "2026-11-19T14:04:50.780Z",
+  "verifiedAt": "2026-11-20T05:14:26.131Z",
   "verifiedBlock": {
     "number": "9",
-    "hash": "0x8f9aca375c5ca4d1bbbc0c9c5eb10af5f079a712347175244a3576289adcf03b"
+    "hash": "0x76f1c4e57d33e63d4e1f9de505d205e04d9a4bcfbd9204d5e09bbd911fbbcee8"
   },
   "token": {
     "symbol": "mUSD",

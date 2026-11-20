@@ -405,4 +405,186 @@ test.describe("persistent metadata and private attachments", () => {
       release();
     }
   });
+  test("selected PNG and pending upload survive background deployment checks without duplicate sends", async ({
+    page,
+    baseURL,
+  }) => {
+    await page.clock.install();
+    await setup(page, baseURL!, "worker");
+    let checks = 0,
+      uploads = 0;
+    const keys = new Set<string>();
+    await page.route("**/deployments/31337.json", async (route) => {
+      checks++;
+      await route.fallback();
+    });
+    await page.goto("/projects/0");
+    const bytes = Buffer.alloc(5626);
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(bytes);
+    await page.getByLabel("Select deliverable file").setInputFiles({
+      name: "Screenshot 2025-05-14 113840.png",
+      mimeType: "image/png",
+      buffer: bytes,
+    });
+    let before = checks;
+    await page.clock.fastForward(31_000);
+    await expect.poll(() => checks).toBeGreaterThan(before);
+    await expect(
+      page.getByText(/File selected: Screenshot 2025-05-14 113840.png/),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Upload privately" }),
+    ).toBeEnabled();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    await page.route("**/api/files?**", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      uploads++;
+      keys.add(route.request().headers()["idempotency-key"]);
+      const u = new URL(route.request().url());
+      const response = await route.fetch({
+        url: `${backend.url}${u.pathname}${u.search}`,
+        headers: await route.request().allHeaders(),
+      });
+      await gate;
+      await route.fulfill({ response });
+    });
+    try {
+      await page.getByRole("button", { name: "Upload privately" }).click();
+      await expect.poll(() => backend.storage.objects.size).toBe(1);
+      before = checks;
+      await page.clock.fastForward(31_000);
+      await expect.poll(() => checks).toBeGreaterThan(before);
+      await expect(
+        page.getByRole("button", { name: /Uploading \d+%/ }),
+      ).toBeDisabled();
+      expect(uploads).toBe(1);
+      release();
+      await expect(page.getByText(/Uploaded privately. SHA-256/)).toBeVisible();
+      await page.getByRole("button", { name: "Upload privately" }).click();
+      await expect.poll(() => uploads).toBe(2);
+      await expect(page.getByText(/Uploaded privately. SHA-256/)).toBeVisible();
+      expect(keys.size).toBe(1);
+      expect(backend.storage.objects.size).toBe(1);
+      expect(
+        (
+          await backend.service.db.query(
+            "SELECT count(*)::int n FROM trustlayer.files",
+          )
+        ).rows[0].n,
+      ).toBe(1);
+      expect([...backend.storage.objects.values()][0]).toEqual(
+        Uint8Array.from(bytes),
+      );
+    } finally {
+      release();
+    }
+  });
+  test("a failed file list is separate from successful uploads and can be retried", async ({
+    page,
+    baseURL,
+  }) => {
+    await setup(page, baseURL!, "worker");
+    let unavailable = true;
+    await page.route("**/api/files?**", async (route) => {
+      if (unavailable && route.request().method() === "GET")
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: { message: "Isolated listing outage" },
+          }),
+        });
+      else await route.fallback();
+    });
+    await page.goto("/projects/0");
+    await expect(page.getByText(/File listing unavailable/)).toBeVisible();
+    await expect(
+      page.getByText("No accessible files are recorded."),
+    ).toHaveCount(0);
+    await page.getByLabel("Select deliverable file").setInputFiles({
+      name: "list-outage.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("List outage does not block upload"),
+    });
+    await expect(
+      page.getByRole("button", { name: "Upload privately" }),
+    ).toBeEnabled();
+    await page.getByRole("button", { name: "Upload privately" }).click();
+    await expect(page.getByText(/Uploaded privately. SHA-256/)).toBeVisible();
+    await expect(page.getByText(/File listing unavailable/)).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Upload privately" }),
+    ).toBeEnabled();
+    unavailable = false;
+    await page.getByRole("button", { name: "Retry file listing" }).click();
+    await expect(
+      page.getByRole("button", { name: "Download & verify" }),
+    ).toBeVisible();
+    expect(backend.storage.objects.size).toBe(1);
+  });
+  test("account switching during an upload drops private results and the selected local file", async ({
+    page,
+    baseURL,
+  }) => {
+    await setup(page, baseURL!, "worker");
+    await page.goto("/projects/0");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    await page.route("**/api/files?**", async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+      const u = new URL(route.request().url());
+      const response = await route.fetch({
+        url: `${backend.url}${u.pathname}${u.search}`,
+        headers: await route.request().allHeaders(),
+      });
+      await gate;
+      await route.fulfill({ response });
+    });
+    try {
+      await page.getByLabel("Select deliverable file").setInputFiles({
+        name: "private-before-switch.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from("Only the original wallet's draft"),
+      });
+      const response = page.waitForResponse(
+        (r) =>
+          r.request().method() === "POST" &&
+          new URL(r.url()).pathname === "/api/files",
+      );
+      await page.getByRole("button", { name: "Upload privately" }).click();
+      await expect.poll(() => backend.storage.objects.size).toBe(1);
+      await page.evaluate(() =>
+        window.__testWallet.account(`0x${"f".repeat(40)}`),
+      );
+      await expect(
+        page.getByRole("button", { name: "Upload privately" }),
+      ).toHaveCount(0);
+      release();
+      await (await response).finished();
+      await expect(page.getByText(/Uploaded privately. SHA-256/)).toHaveCount(
+        0,
+      );
+      await page.evaluate(
+        (address) => window.__testWallet.account(address),
+        signer.address,
+      );
+      await expect(
+        page.getByText(/File selected: private-before-switch.txt/),
+      ).toHaveCount(0);
+      expect(state.writes).toEqual([]);
+    } finally {
+      release();
+    }
+  });
 });

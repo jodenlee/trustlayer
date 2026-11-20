@@ -295,6 +295,47 @@ describe("Phase 4B private files and metadata", { concurrency: false }, () => {
     assert.equal(f.status, "ready");
     assert.equal(store.objects.size, 1);
   });
+  it("recovers stored bytes after metadata synchronization fails without uploading twice", async () => {
+    const key = randomUUID(),
+      query = fixture.db.query;
+    let fail = true,
+      puts = 0;
+    const put = store.storage.put;
+    store.storage.put = async (...args) => {
+      puts++;
+      await put(...args);
+    };
+    fixture.db.query = async <T extends Record<string, unknown>>(
+      sql: string,
+      values?: unknown[],
+    ) => {
+      if (fail && sql.includes("SET status=$2,accepted_chain_time")) {
+        fail = false;
+        throw new Error("Isolated database failure");
+      }
+      return query<T>(sql, values);
+    };
+    try {
+      await assert.rejects(
+        upload("deliverable", b, target, key),
+        /Isolated database failure/,
+      );
+      assert.equal(store.objects.size, 1);
+      assert.equal(
+        (await fixture.db.query("SELECT status FROM trustlayer.files")).rows[0]
+          .status,
+        "failed",
+      );
+      assert.equal(
+        (await upload("deliverable", b, target, key)).status,
+        "ready",
+      );
+      assert.equal(store.objects.size, 1);
+      assert.equal(puts, 1);
+    } finally {
+      fixture.db.query = query;
+    }
+  });
   it("associates only the uploader and actual matching chain hash/receipt", async () => {
     const f = await upload();
     await assert.rejects(files.associate(a, scope, f.id, tx), /uploader/);
@@ -579,6 +620,53 @@ describe("Supabase private REST adapter", () => {
     maxBytes: 1000,
   };
   const path = `v1/${randomUUID()}/${randomUUID()}`;
+  it("recognizes the real hosted HTTP 400 / embedded 404 object-not-found envelope", async () => {
+    const storage = supabaseStorage(config, async (input) =>
+      String(input).includes("/bucket/")
+        ? Response.json({ id: config.bucket, public: false })
+        : Response.json(
+            {
+              statusCode: "404",
+              error: "not_found",
+              message: "Object not found",
+            },
+            { status: 400 },
+          ),
+    );
+    assert.equal(await storage.get(path), null);
+  });
+  for (const status of [400, 401, 403, 500])
+    it(`does not hide Storage HTTP ${status} authorization or invalid-request failures as absent objects`, async () => {
+      const storage = supabaseStorage(config, async (input) =>
+        String(input).includes("/bucket/")
+          ? Response.json({ id: config.bucket, public: false })
+          : Response.json(
+              {
+                statusCode: "403",
+                error: "AccessDenied",
+                message: "Access denied",
+              },
+              { status },
+            ),
+      );
+      await assert.rejects(
+        storage.get(path),
+        /Private storage retrieval failed/,
+      );
+    });
+  for (const status of [401, 403, 404])
+    it(`fails closed before object access when the private bucket returns HTTP ${status}`, async () => {
+      let calls = 0;
+      const storage = supabaseStorage(config, async () => {
+        calls++;
+        return Response.json({}, { status });
+      });
+      await assert.rejects(
+        storage.get(path),
+        /Private bucket configuration could not be verified/,
+      );
+      assert.equal(calls, 1);
+    });
   it("refuses public buckets before sending object requests", async () => {
     let requests = 0;
     const storage = supabaseStorage(config, async () => {

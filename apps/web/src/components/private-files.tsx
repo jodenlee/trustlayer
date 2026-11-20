@@ -1,12 +1,13 @@
 "use client";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { LocalDeployment } from "@trustlayer/contracts";
 import { useBackendAuth } from "./auth-provider";
 import { backendRequest } from "@/lib/auth-client";
 import { metadataScope } from "@/lib/metadata-client";
 import { FILE_TYPES, type FileCategory, type FileRecord } from "@/lib/files";
 import { Button, Field, Input } from "./ui";
+import { useFileDraft } from "./file-draft-provider";
 
 export async function browserFileHash(bytes: ArrayBuffer) {
   return `0x${Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("")}`;
@@ -46,9 +47,11 @@ export function PrivateFiles({
         `/api/files?${target}`,
       ),
   });
-  const [selection, setSelection] = useState<File>();
-  const [key, setKey] = useState("");
-  const [progress, setProgress] = useState<number>();
+  const draftScope = `${auth.session?.address ?? "signed-out"}:${target}:${category}`;
+  const { store, draft, authorized } = useFileDraft(draftScope);
+  const queries = useQueryClient();
+  const selection = draft?.file;
+  const progress = draft?.phase === "uploading" ? draft.progress : undefined;
   const [message, setMessage] = useState("");
   const [receipt, setReceipt] = useState("");
   const live = useRef(true);
@@ -74,20 +77,27 @@ export function PrivateFiles({
     };
   }, []);
   async function upload() {
-    if (!selection || progress !== undefined) return;
-    setProgress(0);
+    if (!identity || !auth.session) return;
+    const attempt = store.start(draftScope);
+    if (!attempt) return;
+    const { file: selected, key, request } = attempt;
+    const actor = auth.session.address;
+    const permitted = () =>
+      store.get(draftScope)?.request === request && authorized(identity, actor);
+    const expired =
+      "Authentication expired or changed. Sign in and retry the same selected file; do not resend a blockchain transaction.";
     setMessage("");
     try {
       if (
-        !selection.size ||
-        selection.size > (files.data?.maxBytes ?? 10 * 1024 * 1024)
+        !selected.size ||
+        selected.size > (files.data?.maxBytes ?? 10 * 1024 * 1024)
       )
         throw new Error(
           "Select a nonempty file within the configured upload limit.",
         );
-      const bytes = await selection.arrayBuffer(),
+      const bytes = await selected.arrayBuffer(),
         hash = await browserFileHash(bytes);
-      if (!active()) return;
+      if (!permitted()) return;
       const result = await new Promise<{ file: FileRecord }>(
         (resolve, reject) => {
           const xhr = new XMLHttpRequest();
@@ -106,22 +116,31 @@ export function PrivateFiles({
                 "Upload interrupted. Reuse the same file/key to recover its status.",
               ),
             );
-          xhr.setRequestHeader("Content-Type", selection.type || "text/plain");
+          xhr.setRequestHeader("Content-Type", selected.type || "text/plain");
           xhr.setRequestHeader(
             "X-File-Name",
-            encodeURIComponent(selection.name),
+            encodeURIComponent(selected.name),
           );
           xhr.setRequestHeader("X-Content-SHA256", hash);
           xhr.setRequestHeader("Idempotency-Key", key);
           xhr.upload.onprogress = (e) => {
-            if (active() && e.lengthComputable)
-              setProgress(Math.round((e.loaded / e.total) * 100));
+            if (permitted() && e.lengthComputable)
+              store.update(draftScope, request, {
+                progress: Math.round((e.loaded / e.total) * 100),
+              });
           };
           xhr.onload = () => {
             try {
               const data = JSON.parse(xhr.responseText);
               if (xhr.status >= 200 && xhr.status < 300) resolve(data);
-              else reject(new Error(data.error?.message ?? "Upload failed."));
+              else
+                reject(
+                  new Error(
+                    xhr.status === 401
+                      ? "Authentication expired. Sign in and retry the same selected file."
+                      : (data.error?.message ?? "Upload failed."),
+                  ),
+                );
             } catch {
               reject(
                 new Error(
@@ -139,19 +158,40 @@ export function PrivateFiles({
           xhr.send(bytes);
         },
       );
-      if (!active()) return;
-      onSelected?.(result.file);
-      setMessage(
-        `Uploaded privately. SHA-256 ${result.file.content_hash}. ${category === "evidence" ? "Off-chain evidence only." : "Not yet submitted on-chain."}`,
-      );
-      await files.refetch();
+      if (!permitted()) return;
+      store.update(draftScope, request, {
+        phase: "success",
+        progress: undefined,
+        result: result.file,
+        message: `Uploaded privately. SHA-256 ${result.file.content_hash}. ${category === "evidence" ? "Off-chain evidence only." : "Not yet submitted on-chain."}`,
+      });
+      if (active()) onSelected?.(result.file);
     } catch (e) {
-      if (active())
-        setMessage(e instanceof Error ? e.message : "Upload failed.");
+      store.update(draftScope, request, {
+        phase: "failed",
+        progress: undefined,
+        result: undefined,
+        message: permitted()
+          ? e instanceof Error
+            ? e.message
+            : "Retry the same selected file."
+          : expired,
+      });
     } finally {
-      // Release the UI lock even when the SIWE session expired mid-request.
-      // Private results/callbacks above still require the original identity.
-      if (live.current) setProgress(undefined);
+      if (
+        store.get(draftScope)?.request === request &&
+        store.get(draftScope)?.phase === "uploading"
+      )
+        store.update(draftScope, request, {
+          phase: "failed",
+          progress: undefined,
+          result: undefined,
+          message: expired,
+        });
+      if (authorized(identity, actor))
+        await queries.invalidateQueries({
+          queryKey: ["private-files", actor, target],
+        });
     }
   }
   async function download(file: FileRecord) {
@@ -205,8 +245,8 @@ export function PrivateFiles({
   if (!auth.session)
     return (
       <p className="small text-muted mt-3">
-        Sign in as a relevant participant or assigned juror to access private
-        files.
+        Authentication required or expired. Sign in as a relevant participant or
+        assigned juror to access private files.
       </p>
     );
   return (
@@ -230,16 +270,16 @@ export function PrivateFiles({
               type="file"
               id={`private-file-${category}-${index}`}
               accept={FILE_TYPES.join(",")}
+              disabled={draft?.phase === "uploading"}
               onChange={(e) => {
-                setSelection(e.target.files?.[0]);
-                setKey(crypto.randomUUID());
+                store.select(draftScope, e.target.files?.[0]);
                 setMessage("");
               }}
             />
           </Field>
           {selection && (
             <p className="small">
-              {selection.name} · {selection.size} bytes ·{" "}
+              File selected: {selection.name} · {selection.size} bytes ·{" "}
               {selection.type || "text/plain"}
             </p>
           )}
@@ -262,12 +302,17 @@ export function PrivateFiles({
         </>
       )}
       {files.error && (
-        <p role="alert" className="form-error">
-          {files.error.message}
-        </p>
+        <div>
+          <p role="alert" className="form-error">
+            File listing unavailable. {files.error.message}
+          </p>
+          <Button variant="ghost" onClick={() => void files.refetch()}>
+            Retry file listing
+          </Button>
+        </div>
       )}
       {files.isPending && <p className="small">Loading private files…</p>}
-      {visibleFiles?.length === 0 && (
+      {files.isSuccess && !files.isFetching && visibleFiles?.length === 0 && (
         <p className="small text-muted">No accessible files are recorded.</p>
       )}
       {visibleFiles?.map((file) => (
@@ -347,6 +392,12 @@ export function PrivateFiles({
             )}
         </div>
       ))}
+      {draft?.message && (
+        <p aria-live="polite" className="small break-words">
+          {draft.phase === "failed" && <span>Upload failed. </span>}
+          <span>{draft.message}</span>
+        </p>
+      )}
       {message && (
         <p aria-live="polite" className="small break-words">
           {message}
