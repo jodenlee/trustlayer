@@ -1,5 +1,5 @@
 import type { HardhatViemHelpers } from "@nomicfoundation/hardhat-viem/types";
-import { formatUnits, getAddress, isAddress, zeroAddress, type Address, type Hash } from "viem";
+import { formatUnits, getAddress, isAddress, zeroAddress, parseUnits, maxUint256, type Address, type Hash } from "viem";
 import { assertDeploymentOnChain, MockUSDAbi, parseLocalDeployment, type LocalDeployment } from "../../packages/contracts/src/index.js";
 import { abiHash, assertRuntimeMatches, type CompiledContract } from "./artifacts.js";
 
@@ -13,6 +13,13 @@ export const PROVISION_TARGETS = [
   { role: "juror3", env: "TRUSTLAYER_JUROR_3", target: 200n * 10n ** 6n },
 ] as const;
 export type ProvisioningEnvironment = Record<string, string | undefined>;
+export function provisioningAmount(value: string | undefined, decimals: number, fallback: bigint) {
+  if (value === undefined) return fallback;
+  if (!new RegExp(`^\\d+(?:\\.\\d{1,${decimals}})?$`).test(value)) throw new Error(`Target balances require nonnegative decimal amounts with at most ${decimals} decimal places.`);
+  const amount = parseUnits(value, decimals);
+  if (amount > maxUint256) throw new Error("Target exceeds uint256.");
+  return amount;
+}
 
 export function assertProvisioningRpc(value: string) {
   if (new URL(value).toString() !== `${PROVISION_RPC_URL}/`)
@@ -23,7 +30,7 @@ export function provisioningRecipients(env: ProvisioningEnvironment) {
     const value = env[setting.env]?.trim();
     if (!value || !isAddress(value) || getAddress(value) === zeroAddress)
       throw new Error(`${setting.env} must contain a valid nonzero Ethereum address (including a valid mixed-case checksum).`);
-    return { ...setting, address: getAddress(value) };
+    return { ...setting, target: provisioningAmount(env[`${setting.env}_MUSD`], 6, setting.target), address: getAddress(value) };
   });
   if (new Set(recipients.map((r) => r.address.toLowerCase())).size !== 5)
     throw new Error("Client, freelancer and three jurors must use five distinct wallet addresses.");
@@ -90,6 +97,8 @@ export async function provisionLocalTokens(
     throw new Error(`Initial holder has insufficient mUSD: ${formatUnits(holderBalance, 6)} available, ${formatUnits(needed + holderTarget, 6)} required. No transfers sent.`);
   if (needed > 0n && await client.getBalance({ address: holder }) === 0n)
     throw new Error("The unlocked initial holder needs local ETH for gas. No token transfers sent.");
+  if (env.TRUSTLAYER_PROVISION_NATIVE === "true")
+    await provisionNative(viem, manifest, env, holder, log);
   log(`Verified Hardhat Local 31337 at ${PROVISION_RPC_URL}; MockUSD ${token.address}; supply ${formatUnits(supply, 6)} mUSD.`);
   log(`Original mint holder ${holder}; existing balance ${formatUnits(holderBalance, 6)} mUSD. Top-ups needed: ${formatUnits(needed, 6)} mUSD.`);
   const transfers: { role: string; address: Address; amount: bigint; hash: Hash }[] = [];
@@ -129,4 +138,45 @@ export async function provisionLocalTokens(
   for (const r of results) log(`${r.role}: ${r.address} = ${formatUnits(r.balance, 6)} mUSD (target ${formatUnits(r.target, 6)}).`);
   log(`Complete: ${transfers.length} confirmed transfer(s); total supply unchanged at ${formatUnits(supply, 6)} mUSD.`);
   return { holder, token: token.address, transfers, recipients: results, supply };
+}
+
+/** Reuses the verified mint holder's unlocked development account; no setBalance or keys. */
+export async function provisionNative(viem: HardhatViemHelpers, manifest: LocalDeployment, env: ProvisioningEnvironment, holder: Address, log: (message: string) => void = console.log) {
+  assertProvisioningRpc(manifest.rpcUrl);
+  const recipients = provisioningRecipients(env).map(r => ({ ...r, target: provisioningAmount(env[`${r.env}_ETH`] ?? env.TRUSTLAYER_ETH_TARGET, 18, 10n ** 19n) }));
+  const client = await viem.getPublicClient();
+  await assertDeploymentOnChain(client, manifest);
+  const wallet = (await viem.getWalletClients()).find(w => w.account.address.toLowerCase() === holder.toLowerCase());
+  if (!wallet || wallet.account.type !== "json-rpc") throw new Error("ETH funding requires the existing unlocked development holder.");
+  const protectedAddresses = new Set(Object.values(manifest.contracts).map(c => c.address.toLowerCase()));
+  let needed = 0n, reserve = 0n;
+  for (const r of recipients) {
+    const code = await client.getCode({address:r.address});
+    if (protectedAddresses.has(r.address.toLowerCase()) || (code && code !== "0x")) throw new Error("ETH recipients must be explicit development wallets, not deployed contracts.");
+    const balance = await client.getBalance({address:r.address});
+    if (r.address.toLowerCase() === holder.toLowerCase()) {reserve = r.target; continue;}
+    needed += balance < r.target ? r.target - balance : 0n;
+  }
+  const gasReserve = needed ? 21000n * 10n * await client.getGasPrice() : 0n;
+  if (await client.getBalance({address:holder}) < needed + reserve + gasReserve) throw new Error("Insufficient native ETH in the development holder; no wallet top-ups sent.");
+  const transfers: Hash[] = [];
+  for (const r of recipients) {
+    await assertDeploymentOnChain(client, manifest);
+    const before = await client.getBalance({address:r.address});
+    log(`${r.role}: native ETH before ${formatUnits(before,18)}; target ${formatUnits(r.target,18)}.`);
+    if (before >= r.target) continue;
+    if ((await client.getTransactionCount({address:holder,blockTag:"pending"})) !== (await client.getTransactionCount({address:holder,blockTag:"latest"}))) throw new Error("Development holder has pending transactions; inspect their receipts before retrying.");
+    if (await wallet.getChainId() !== 31337) throw new Error("Wallet chain changed before native funding.");
+    const hash = await wallet.sendTransaction({to:r.address,value:r.target-before,gas:21000n});
+    log(`${r.role}: native ETH submitted ${hash}.`);
+    let receipt;
+    try {receipt = await client.waitForTransactionReceipt({hash,timeout:60000});}
+    catch(error) {throw new Error(`Confirmation unresolved for native transfer ${hash}. Inspect its receipt before retrying.`,{cause:error});}
+    if (receipt.status !== "success") throw new Error(`Native funding reverted: ${hash}.`);
+    const balance = await client.getBalance({address:r.address});
+    if (balance < r.target) throw new Error(`Native funding confirmed ${hash}, but target balance changed. Inspect before retrying.`);
+    log(`${r.role}: native ETH confirmed ${hash}; balance ${formatUnits(balance,18)}.`);
+    transfers.push(hash);
+  }
+  return transfers;
 }

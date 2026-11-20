@@ -105,7 +105,7 @@ export function ChainProjects({ dashboard = false }: { dashboard?: boolean }) {
     : "";
   const items = data.projects;
   const titles = useProjectTitles(
-    deployment.ready ? deployment.data?.manifest : undefined,
+    deployment.readable ? deployment.data?.manifest : undefined,
     items.map((p) => p.id),
   );
   const rows = items.filter(
@@ -116,7 +116,7 @@ export function ChainProjects({ dashboard = false }: { dashboard?: boolean }) {
         .includes(search.toLowerCase()),
   );
   const now = data.data?.pages[0]?.now ?? 0n;
-  const loaded = deployment.ready && data.isSuccess;
+  const loaded = deployment.readable && data.isSuccess;
   const pending = items.filter(
     (p) =>
       deployment.address &&
@@ -225,7 +225,7 @@ export function ChainProjects({ dashboard = false }: { dashboard?: boolean }) {
             />
           </div>
         </div>
-        {!deployment.ready ? (
+        {!deployment.readable ? (
           <EmptyState
             title="Verify your local connection"
             description="On-chain project reads are paused until your wallet and deployment are verified. Sample projects are not used as account data."

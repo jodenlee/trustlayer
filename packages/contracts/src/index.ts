@@ -15,6 +15,9 @@ export interface LocalDeployment {
   ephemeral: boolean;
   verifiedAt: string;
   verifiedBlock: { number: string; hash: Hex };
+  /** Managed chains use a random on-chain anchor; legacy Hardhat bindings expire on restart. */
+  chainIdentity?: { number: string; hash: Hex };
+  hardhatInstanceId?: Hex;
   token: { symbol: "mUSD"; decimals: typeof TOKEN_DECIMALS };
   contracts: Record<ContractName, { address: Address; abiHash: Hex; runtimeCodeHash: Hex }>;
   authorities: { treasuryOwner: Address; escrowConfigurator: Address; registryConfigurator: Address; treasuryConfigurator: Address };
@@ -51,6 +54,12 @@ export function parseLocalDeployment(value: unknown): LocalDeployment {
   record(value.verifiedBlock);
   if (typeof value.verifiedBlock.number !== "string" || !/^\d+$/.test(value.verifiedBlock.number)) throw new Error("Invalid verification block");
   hash(value.verifiedBlock.hash);
+  if (value.chainIdentity !== undefined) {
+    record(value.chainIdentity);
+    if (typeof value.chainIdentity.number !== "string" || !/^\d+$/.test(value.chainIdentity.number)) throw new Error("Invalid chain identity block");
+    hash(value.chainIdentity.hash);
+  }
+  if (value.hardhatInstanceId !== undefined) hash(value.hardhatInstanceId);
   record(value.token);
   if (value.token.symbol !== "mUSD" || value.token.decimals !== TOKEN_DECIMALS) throw new Error("Unsupported payment token metadata");
   record(value.contracts);
@@ -84,9 +93,15 @@ export function getContracts(deployment: LocalDeployment, connectedChainId: numb
 }
 
 /// Reject stale/reset chains and changed runtime code before enabling a future wallet workflow.
-export async function assertDeploymentOnChain(client: Pick<PublicClient, "getChainId" | "getBlock" | "getCode">, deployment: LocalDeployment) {
+export async function assertDeploymentOnChain(client: Pick<PublicClient, "getChainId" | "getBlock" | "getCode"> & Partial<Pick<PublicClient, "request">>, deployment: LocalDeployment) {
   const manifest = parseLocalDeployment(deployment);
   if (await client.getChainId() !== manifest.chainId) throw new Error("RPC chain does not match deployment");
+  if (manifest.chainIdentity && (await client.getBlock({ blockNumber: BigInt(manifest.chainIdentity.number) })).hash !== manifest.chainIdentity.hash) throw new Error("Chain identity anchor changed; restore the correct local backup. Historical metadata must not be rebound.");
+  if (manifest.hardhatInstanceId) {
+    if (!client.request) throw new Error("Cannot verify Hardhat chain instance identity");
+    const metadata = await client.request({method: "hardhat_metadata"} as never) as {instanceId?: Hex};
+    if (metadata.instanceId !== manifest.hardhatInstanceId) throw new Error("Hardhat instance changed; this is a fresh chain. Restore a supported backup or explicitly initialize a new deployment.");
+  }
   const block = await client.getBlock({ blockNumber: BigInt(manifest.verifiedBlock.number) });
   if (block.hash !== manifest.verifiedBlock.hash) throw new Error("Verification block changed; re-export this local deployment");
   for (const name of CONTRACT_NAMES) {

@@ -8,13 +8,13 @@
       "schemaVersion": 1,
       "module": "TrustLayerPhase2D",
       "chainId": 31337,
-      "deploymentId": "phase2e-15160-1794976626337-1",
+      "deploymentId": "phase2e-28096-1795167536144-1",
       "rpcUrl": "http://127.0.0.1:18545/",
       "ephemeral": true,
-      "verifiedAt": "2026-11-18T04:37:46.308Z",
+      "verifiedAt": "2026-11-20T09:39:27.313Z",
       "verifiedBlock": {
         "number": "9",
-        "hash": "0xcc67b8b9a5a0e746b89ca372c05bf76423e80d4820d1ee355bdd289567587c0d"
+        "hash": "0x9f2c42beef248d930eefd09697718974fadb9a5ae2d547295ed29afd6c9352a7"
       },
       "token": {
         "symbol": "mUSD",
@@ -64,19 +64,20 @@
         "repeatedConfigurationRejected": true,
         "runtimeMatchesCompiledArtifacts": true
       },
+      "hardhatInstanceId": "0x4c9a51f5b06f62db202beb88ea554e3bb0fb605534c711871b3a4cb11c601bb9",
       "idempotentResumeVerified": true
     },
     {
       "schemaVersion": 1,
       "module": "TrustLayerPhase2D",
       "chainId": 31337,
-      "deploymentId": "phase2e-15160-1794976666404-2",
+      "deploymentId": "phase2e-28096-1795167587766-2",
       "rpcUrl": "http://127.0.0.1:18545/",
       "ephemeral": true,
-      "verifiedAt": "2026-11-18T04:38:23.053Z",
+      "verifiedAt": "2026-11-20T09:40:15.851Z",
       "verifiedBlock": {
         "number": "9",
-        "hash": "0x4f1b6cc5464fb3bde0f9f55a01f106daadf87b949586332eedb5d73375f82814"
+        "hash": "0xeacaeaee9f8c369ecd6b933471a7ddc84507546d83a904136d0098e68eb01de7"
       },
       "token": {
         "symbol": "mUSD",
@@ -126,6 +127,7 @@
         "repeatedConfigurationRejected": true,
         "runtimeMatchesCompiledArtifacts": true
       },
+      "hardhatInstanceId": "0x32e2535c39903df9970ab0b5394c136d5e55fa829df4f7e689347582e0c0c5b4",
       "idempotentResumeVerified": true
     }
   ]

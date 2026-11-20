@@ -246,7 +246,7 @@ export function chainAuthority(
     },
     async project(scope, projectId, wallet) {
       const { manifest, client, contracts } = await verified(scope);
-      const blockNumber = await client.getBlockNumber();
+      const blockNumber = await client.getBlockNumber({ cacheTime: 0 });
       const count = await client.readContract({
         ...contracts.TrustEscrow,
         functionName: "nextProjectId",
@@ -297,7 +297,7 @@ export function chainAuthority(
     },
     async dispute(scope, disputeId, wallet) {
       const { client, contracts } = await verified(scope);
-      const blockNumber = await client.getBlockNumber();
+      const blockNumber = await client.getBlockNumber({ cacheTime: 0 });
       const count = await client.readContract({
         ...contracts.DisputeArbitration,
         functionName: "nextDisputeId",

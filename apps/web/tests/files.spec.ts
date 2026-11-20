@@ -17,8 +17,11 @@ test.describe("persistent metadata and private attachments", () => {
     state: ReturnType<typeof escrowRpc>,
     signer: ReturnType<typeof privateKeyToAccount>;
   test.afterEach(async ({ page }) => {
-    // Close the page before removing handlers: no polling may escape to the
-    // developer's running local RPC while the isolated backend is torn down.
+    // Destroy the app realm while interception is still installed, then drain
+    // route.fetch calls before shutting down their isolated HTTP backend. Page
+    // close alone does not wait for APIRequestContext requests already queued.
+    await page.goto("about:blank");
+    await page.unrouteAll({ behavior: "wait" });
     await page.close();
     await backend?.close();
   });
@@ -89,6 +92,62 @@ test.describe("persistent metadata and private attachments", () => {
       page.getByRole("heading", { name: title, exact: true }),
     ).toBeVisible();
   }
+  test("background revalidation preserves mounted file inputs and metadata drafts, then hides a stale deployment", async ({
+    page,
+    baseURL,
+  }) => {
+    await page.clock.install();
+    await setup(page, baseURL!, "worker");
+    await page.goto("/projects/0");
+    const title = page.getByLabel("Saved project title");
+    await title.fill("Unsaved Phase 5 draft");
+    const input = page.getByLabel("Select deliverable file");
+    await input.setInputFiles({
+      name: "phase5.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("phase5"),
+    });
+    await input.evaluate((el) => {
+      (el as HTMLInputElement).dataset.phase5 = "same-dom";
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((ok) => {
+      release = ok;
+    });
+    let checks = 0;
+    await page.route("**/deployments/31337.json", async (route) => {
+      checks++;
+      await gate;
+      await route.fallback();
+    });
+    await page.clock.fastForward(31_000);
+    await expect.poll(() => checks).toBeGreaterThan(0);
+    await expect(
+      page.getByText(/Showing the last verified project/),
+    ).toBeVisible();
+    await expect(title).toHaveValue("Unsaved Phase 5 draft");
+    await expect(input).toHaveAttribute("data-phase5", "same-dom");
+    release();
+    await expect(
+      page.getByText(/Showing the last verified project/),
+    ).toBeHidden();
+    await expect(input).toHaveAttribute("data-phase5", "same-dom");
+    await expect(title).toHaveValue("Unsaved Phase 5 draft");
+    await page.unroute("**/deployments/31337.json");
+    await page.route("**/deployments/31337.json", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: "{}",
+      }),
+    );
+    await page.clock.fastForward(31_000);
+    await expect(
+      page.getByRole("alert", { name: "Deployment setup" }),
+    ).toBeVisible();
+    await expect(input).toHaveCount(0);
+    expect(state.writes).toEqual([]);
+  });
   test("saves participant metadata and restores titles/descriptions after refresh", async ({
     page,
     baseURL,

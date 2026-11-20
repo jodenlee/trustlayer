@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "module": "TrustLayerPhase2D",
   "chainId": 31337,
-  "deploymentId": "chain-31337",
+  "deploymentId": "phase5-dev1",
   "rpcUrl": "http://127.0.0.1:8545/",
   "ephemeral": false,
-  "verifiedAt": "2026-11-20T05:14:26.131Z",
+  "verifiedAt": "2026-11-20T10:43:36.246Z",
   "verifiedBlock": {
-    "number": "9",
-    "hash": "0x76f1c4e57d33e63d4e1f9de505d205e04d9a4bcfbd9204d5e09bbd911fbbcee8"
+    "number": "10",
+    "hash": "0xa7359e33e29f29b41dc25b4f3091990110c50f1c9b68525bf45368b8d52a5fb1"
   },
   "token": {
     "symbol": "mUSD",
@@ -57,5 +57,9 @@
     ],
     "repeatedConfigurationRejected": true,
     "runtimeMatchesCompiledArtifacts": true
+  },
+  "chainIdentity": {
+    "number": "1",
+    "hash": "0x1c43af75b92e2ae702d608de1edba62ac7f28f6bb0f06ee27e48da5be6081061"
   }
 }

@@ -270,6 +270,262 @@ try {
   await files.download(j1.account.address.toLowerCase(), scope, opening.id);
   await assert.rejects(files.remove(a, scope, extra.id), /cannot be deleted/);
   assert.equal(await d.escrow.read.totalEscrowLiability(), 0n);
+  // Phase 5 combines durable SIWE/profile/SQL, private exact-byte attachments,
+  // actual receipts and every settlement branch in one isolated system run.
+  for (const wallet of [customer, worker, j1, j2, j3]) {
+    const address = wallet.account.address.toLowerCase();
+    const challenge = await service.nonce(address);
+    const login = await service.verify(
+      challenge.message,
+      await wallet.signMessage({ message: challenge.message }),
+      challenge.challenge,
+    );
+    assert.equal((await service.session(login.token))?.address, address);
+    await service.updateProfile(address, {
+      displayName: "Integration wallet",
+      biography: "Isolated verification",
+    });
+    assert.equal(
+      (await service.profile(address)).display_name,
+      "Integration wallet",
+    );
+  }
+  for (const juror of [j1, j2, j3])
+    await confirmed(
+      await d.arbitration.write.claimJurorReward([0n], {
+        account: juror.account,
+      }),
+    );
+  await confirmed(
+    await d.token.write.transfer([customer.account.address, 200_000_000n]),
+  );
+  for (const [index, outcome] of [0, 1, 2, 3].entries()) {
+    const id = BigInt(index + 1),
+      idString = String(id),
+      amount = 10_000_000n;
+    const target = { ...scope, projectId: idString, milestoneIndex: 0 };
+    await confirmed(
+      await d.escrow.write.createProject(
+        [
+          worker.account.address,
+          [amount],
+          [(await client.getBlock()).timestamp + 9n * 86400n],
+          hash,
+        ],
+        { account: customer.account },
+      ),
+    );
+    const metadata = {
+      title: `System outcome ${outcome}`,
+      description: "Verified scope",
+      milestones: [
+        { index: 0, name: "Delivery", description: "Private bytes" },
+      ],
+    };
+    // SQL outage after the confirmed chain action: retry metadata, never create again.
+    const save = service.saveProject.bind(service);
+    const unavailable = new BackendService(
+      {
+        ...database.db,
+        transaction: async () => {
+          throw new Error("simulated backend outage after chain confirmation");
+        },
+      },
+      service.origin,
+      service.chain,
+    );
+    await assert.rejects(
+      unavailable.saveProject(a, scope, idString, metadata),
+      /simulated backend outage/,
+    );
+    await save(a, scope, idString, metadata);
+    await save(a, scope, idString, metadata);
+    assert.equal(
+      (await service.project(b, scope, idString)).title,
+      metadata.title,
+    );
+    assert.equal(await d.escrow.read.nextProjectId(), id + 1n);
+    await confirmed(
+      await d.token.write.approve([d.escrow.address, amount], {
+        account: customer.account,
+      }),
+    );
+    await confirmed(
+      await d.escrow.write.fundProject([id], { account: customer.account }),
+    );
+    await confirmed(
+      await d.escrow.write.acceptProject([id], { account: worker.account }),
+    );
+    const file = await files.upload(
+      b,
+      target,
+      "deliverable",
+      randomUUID(),
+      "delivery.txt",
+      "text/plain",
+      bytes,
+      hash,
+    );
+    const submitted = await confirmed(
+      await d.escrow.write.submitMilestone([id, 0n, hash], {
+        account: worker.account,
+      }),
+    );
+    await files.associate(b, scope, file.id, submitted);
+    await files.associate(b, scope, file.id, submitted);
+    assert.deepEqual((await files.download(a, scope, file.id)).bytes, bytes);
+    const freelancerBefore = await d.token.read.balanceOf([
+      worker.account.address,
+    ]);
+    const clientBefore = await d.token.read.balanceOf([
+      customer.account.address,
+    ]);
+    const treasuryBefore = await d.treasury.read.availableRevenue();
+    if (outcome === 0) {
+      await confirmed(
+        await d.escrow.write.approveMilestone([id, 0n], {
+          account: customer.account,
+        }),
+      );
+      assert.equal(
+        await d.token.read.balanceOf([worker.account.address]),
+        freelancerBefore + 9_900_000n,
+      );
+      assert.equal(
+        await d.treasury.read.availableRevenue(),
+        treasuryBefore + 100_000n,
+      );
+    } else {
+      const caseId = await d.arbitration.read.nextDisputeId();
+      const open = await files.upload(
+        a,
+        target,
+        "opening",
+        randomUUID(),
+        "opening.txt",
+        "text/plain",
+        bytes,
+        hash,
+      );
+      await confirmed(
+        await d.token.write.approve([d.arbitration.address, 15_000_000n], {
+          account: customer.account,
+        }),
+      );
+      const opened = await confirmed(
+        await d.arbitration.write.openDispute([id, 0n, hash], {
+          account: customer.account,
+        }),
+      );
+      await files.associate(a, scope, open.id, opened, String(caseId));
+      const response = await files.upload(
+        b,
+        { ...target, disputeId: String(caseId) },
+        "response",
+        randomUUID(),
+        "response.txt",
+        "text/plain",
+        bytes,
+        hash,
+      );
+      const responded = await confirmed(
+        await d.arbitration.write.respondToDispute([caseId, hash], {
+          account: worker.account,
+        }),
+      );
+      await files.associate(b, scope, response.id, responded, String(caseId));
+      await files.download(
+        j1.account.address.toLowerCase(),
+        scope,
+        response.id,
+      );
+      await assert.rejects(
+        files.download(
+          outsider.account.address.toLowerCase(),
+          scope,
+          response.id,
+        ),
+      );
+      const dispute = await d.arbitration.read.getDispute([caseId]);
+      await connection.provider.request({
+        method: "evm_setNextBlockTimestamp",
+        params: [Number(dispute.responseDeadline)],
+      });
+      for (const juror of [j1, j2])
+        await confirmed(
+          await d.arbitration.write.castVote([caseId, outcome], {
+            account: juror.account,
+          }),
+        );
+      await connection.provider.request({
+        method: "evm_setNextBlockTimestamp",
+        params: [Number(dispute.votingDeadline + 1n)],
+      });
+      await confirmed(
+        await d.arbitration.write.finalizeDispute([caseId], {
+          account: outsider.account,
+        }),
+      );
+      const bps = outcome === 1 ? 10000n : outcome === 2 ? 0n : 5000n;
+      const gross = (amount * bps) / 10000n,
+        fee = gross / 100n;
+      const settled = await d.arbitration.read.getDispute([caseId]);
+      assert.equal(BigInt(settled.freelancerBps), bps);
+      assert.equal(settled.fallbackApplied, false);
+      assert.equal(
+        await d.token.read.balanceOf([worker.account.address]),
+        freelancerBefore + gross - fee,
+      );
+      assert.equal(
+        await d.token.read.balanceOf([customer.account.address]),
+        clientBefore - 15_000_000n + amount - gross,
+      );
+      assert.equal(
+        await d.treasury.read.availableRevenue(),
+        treasuryBefore + 3_000_000n + fee,
+      );
+      for (const juror of [j1, j2, j3]) {
+        const before = await d.token.read.balanceOf([juror.account.address]);
+        await confirmed(
+          await d.arbitration.write.claimJurorReward([caseId], {
+            account: juror.account,
+          }),
+        );
+        assert.equal(
+          await d.token.read.balanceOf([juror.account.address]),
+          before + 4_000_000n,
+        );
+      }
+      await files.download(j1.account.address.toLowerCase(), scope, open.id);
+    }
+    assert.equal(await d.escrow.read.totalEscrowLiability(), 0n);
+  }
+  assert.equal(await d.registry.read.totalStaked(), 300_000_000n);
+  assert.equal(await d.registry.read.totalLockedStake(), 0n);
+  assert.equal(await d.arbitration.read.reservedJurorRewards(), 0n);
+  assert.equal(await d.token.read.balanceOf([d.escrow.address]), 0n);
+  assert.equal(await d.treasury.read.availableRevenue(), 12_300_000n);
+  const balances = await Promise.all(
+    [
+      owner.account.address,
+      customer.account.address,
+      worker.account.address,
+      j1.account.address,
+      j2.account.address,
+      j3.account.address,
+      d.escrow.address,
+      d.registry.address,
+      d.arbitration.address,
+      d.treasury.address,
+    ].map((address) => d.token.read.balanceOf([address])),
+  );
+  assert.equal(
+    balances.reduce((sum, balance) => sum + balance, 0n),
+    await d.token.read.totalSupply(),
+  );
+  console.log(
+    "Phase 5 full-system outcomes passed: normal approval, freelancer/client/split majorities and earlier fallback, actual SIWE/profile persistence, idempotent metadata/file recovery, private party/juror access, exact payouts/fees and 12 reward claims; staking collateral intact.",
+  );
   console.log(
     "Phase 4B file integration passed: actual escrow submission/opening/response receipts, SHA-256 attachments, SQL metadata, private party/juror access, deadline rejection and retained evidence after finalization; zero escrow liability.",
   );

@@ -31,12 +31,14 @@ Source of truth: TrustLayer Solution Design Document v1.0 (2026-11-16).
 
 ## Phase 4 — backend and off-chain foundation
 - Phase 4A: Next.js server route handlers, private Supabase/PostgreSQL schema, durable SIWE nonces/sessions, own-profile editing, verified-participant project metadata APIs and separate frontend sign-in. Existing transaction and memory-only project workflows remain intact. See [Phase 4A](PHASE4A.md) for setup, verification and limitations. Stop after Phase 4A for review.
-- Phase 4B: persistent project/milestone text integrated with receipt-confirmed creation and safe metadata retry; private Supabase Storage adapter, immutable SHA-256 deliverables/opening/response associations, off-chain deadline-bound supplemental evidence and participant/assigned-juror downloads. The additive hosted SQL migration is applied; hosted Storage configuration/manual verification remains required. See [Phase 4B](PHASE4B.md). Stop after Phase 4B for review.
+- Phase 4B: persistent project/milestone text integrated with receipt-confirmed creation and safe metadata retry; private Supabase Storage adapter, immutable SHA-256 deliverables/opening/response associations, off-chain deadline-bound supplemental evidence and participant/assigned-juror downloads. The additive hosted SQL migration is applied; the user reports private Storage manually verified. See [Phase 4B](PHASE4B.md).
 
-## Phase 5 — final integration, hardening and demo (deferred)
-- Edge cases, test coverage, manual walkthrough, transaction history
-- Demo seed accounts and deterministic local-chain time control
-- White-paper claim-to-code review and presentation rehearsal
+## Phase 5 — integration, local recovery and hardening
+
+- Approved optional Anvil local backend, immutable backups, actual restart verification, random chain identity and explicit fresh/restore/status operations; the existing Hardhat node is not migrated automatically.
+- Stable deployment exports, fresh backend authorization reads, mounted background views and explicit ETH/mUSD top-ups for five development wallets.
+- Combined SIWE/SQL/private-file/protocol verification and a read-only runtime-role checker. Hosted credential transition and actual MetaMask recovery demonstration remain manual.
+- See [Phase 5](PHASE5.md) for commands, exact results and limitations. Stop after Phase 5 for review.
 
 ## Not implemented yet
-Juror penalties, migration of old deployed funds, refund/treasury administration frontend actions, persistence of unconfirmed drafts, reorg-aware event index, local blockchain persistence/recovery, malware scanning, runtime-role separation, production security audit, and optional Sepolia deployment. Phase 4B implements private file APIs and confirmed project metadata synchronization; hosted Storage configuration/manual verification remains external. Fixed Phase 2D juror rewards and treasury remain unchanged. Stop after Phase 4B; Phase 5 requires separate approval.
+Juror penalties, migration of old deployed funds, refund/treasury administration frontend actions, persistence of unconfirmed drafts, reorg-aware event indexing, lossless migration of an existing volatile Hardhat process, malware scanning, the operator's hosted runtime-role transition, production audit and optional Sepolia deployment. Future managed Anvil chains support explicit verified backup/recovery. The user reports Phase 4B private Storage manually verified. Fixed rewards and treasury economics remain unchanged. Stop after Phase 5 for review.

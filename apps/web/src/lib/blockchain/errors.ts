@@ -25,7 +25,23 @@ export function describeError(error: unknown): {
   let current = error;
   while (current && typeof current === "object" && !visited.has(current)) {
     visited.add(current);
-    const item = current as { code?: number; name?: string; cause?: unknown };
+    const item = current as {
+      code?: number;
+      name?: string;
+      cause?: unknown;
+      message?: string;
+    };
+    if (
+      /NonceTooLow|NonceTooHigh/.test(item.name ?? "") ||
+      /nonce (?:too low|too high|has already been used)|replacement transaction underpriced/i.test(
+        item.message ?? "",
+      )
+    )
+      return {
+        kind: "rpc",
+        message:
+          "Wallet nonce does not match the local chain. Check pending receipts and deployment identity. After a confirmed fresh-chain reset, clear MetaMask activity/nonce data for Hardhat Local only; do not resend an uncertain transaction. See docs/PHASE5.md.",
+      };
     if (item.name?.includes("InsufficientFunds"))
       return {
         kind: "rpc",

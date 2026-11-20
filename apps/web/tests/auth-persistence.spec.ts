@@ -11,7 +11,11 @@ import {
 test.describe("wallet and SIWE refresh persistence", () => {
   let backend: Awaited<ReturnType<typeof authBackend>>;
   test.afterEach(async ({ page }) => {
+    // Stop app polling before removing RPC interception; drain HTTP bridges
+    // while their isolated server is still available.
+    await page.goto("about:blank");
     await page.unrouteAll({ behavior: "wait" });
+    await page.close();
     await backend?.close();
   });
   async function setup(page: Page, baseURL: string, deferReconnect = false) {

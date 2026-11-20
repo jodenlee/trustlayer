@@ -2,7 +2,7 @@
 
 **Decentralized Freelance Escrow and Dispute Resolution Protocol**
 
-Implemented today: milestone escrow, juror staking/selection, on-chain dispute voting and atomic settlement, protocol treasury and fixed juror pull rewards, plus **Phase 3D dispute and juror workflows** and the **Phase 4A PostgreSQL/SIWE backend foundation**. Verified local wallets can create/fund/deliver/pay projects, open disputes, respond with hashes, register/stake/withdraw as jurors, cast public votes, finalize and claim fixed rewards. Connected views show actual chain state; sample views remain labeled previews. Phase 4A adds wallet-linked profiles and authorized metadata APIs; project creation text still uses the existing memory-only workflow. Hosted database setup, evidence storage, penalties and reputation remain outstanding. This protocol is not audited or ready for handling real funds.
+Implemented today: milestone escrow, juror staking/selection, on-chain arbitration, protocol treasury and fixed juror rewards; wallet/SIWE profiles; PostgreSQL project metadata; and private, receipt-bound Supabase attachments. **Phase 5** adds an approved optional Anvil local backend with verified disk backup/restore, unique chain binding, stable deployment exports, explicit ETH/mUSD provisioning and integration hardening. Connected views show actual chain state; sample views remain labeled previews. See [Phase 5 operations and verification](docs/PHASE5.md). This protocol is not audited or ready for handling real funds.
 
 ## Requirements
 
@@ -20,7 +20,9 @@ npm test
 
 The dependency lockfile is tracked; use `npm ci` for reproducible installation and `npm install` only for intentional dependency updates. Avoid mixing Hardhat 2 and 3 packages.
 
-Start a persistent local blockchain:
+For a new recoverable local chain, follow [Phase 5 startup, backup and restoration](docs/PHASE5.md). Keep an existing valuable Hardhat process running until you explicitly decide to start a new chain; its current state cannot be fully exported by the installed Hardhat version.
+
+The historical volatile Hardhat node remains available:
 
 ```powershell
 npm run node
@@ -32,7 +34,7 @@ In a **second terminal**, deploy locally:
 npx.cmd hardhat ignition deploy ignition/modules/Phase2D.ts --network localhost
 ```
 
-The complete deployment returns local token, treasury, escrow, registry and arbitration addresses with their permissions configured. The localhost network resets when you stop the node; this is expected. Earlier modules remain available for historical phase verification.
+The complete deployment returns local token, treasury, escrow, registry and arbitration addresses with their permissions configured. A plain Hardhat node resets when stopped. Use the managed Anvil workflow for future disk recovery, a bound manifest before live frontend use, and unique Ignition IDs for new chains. Earlier modules remain available for historical phase verification.
 
 ## Repo layout
 
@@ -119,7 +121,7 @@ Phase 2E introduced a 156-test blockchain suite, including normal first-mileston
 
 TrustLayer is maintained by one developer with Codex assistance. Follow `AGENTS.md`, use focused changes and review the diff and verification results before committing. Keep credentials, populated environment files, node_modules and cache out of Git. Pushes, merges and public deployments require explicit approval.
 
-Smart-contract verification remains available independently. Phase 3A supplies the interface foundation, Phase 3B adds wallet/deployment verification, Phase 3C integrates escrow and Phase 3D integrates arbitration/staking/rewards. Phase 4A adds PostgreSQL metadata and wallet authentication. Phase 4B integrates persistent project text and private deliverables/case files. Stop after Phase 4B for review; Phase 5 requires separate approval.
+Smart-contract verification remains available independently. Phase 3A supplies the interface foundation, Phase 3B adds wallet/deployment verification, Phase 3C integrates escrow and Phase 3D integrates arbitration/staking/rewards. Phase 4A adds PostgreSQL metadata and wallet authentication. Phase 4B integrates persistent project text and private deliverables/case files. Phase 5 adds approved local recovery and integration hardening; stop after Phase 5 for review.
 
 ## Frontend through Phase 3D
 
@@ -152,11 +154,11 @@ npm.cmd --prefix apps/web run db:migrate
 npm.cmd run web:dev
 ```
 
-Apply migrations as database owner, then grant `trustlayer_server` to a dedicated runtime login. Connect MetaMask in Settings, explicitly sign in, and edit the separate wallet-linked profile. Local HTTP sign-in uses `next dev`; production requires HTTPS/Secure cookies. See [Phase 4A](docs/PHASE4A.md) for role grants, Supabase/TLS configuration, exact API contracts, verification results and disposable database reset instructions. No hosted database connection is claimed without credentials. Automated database tests use an isolated embedded PostgreSQL engine; `npx.cmd hardhat run apps/web/scripts/verify-backend-workflow.ts` also checks metadata authorization against actual production contracts on an isolated EVM. Existing local blockchain persistence issues remain deferred to Phase 5.
+Apply migrations as database owner, then grant `trustlayer_server` to a dedicated runtime login. Connect MetaMask in Settings, explicitly sign in, and edit the separate wallet-linked profile. Local HTTP sign-in uses `next dev`; production requires HTTPS/Secure cookies. See [Phase 4A](docs/PHASE4A.md) for Supabase/TLS and API contracts, and [Phase 5](docs/PHASE5.md) for the manual runtime-role transition/read-only checker. Automated database tests use isolated PostgreSQL; `npx.cmd hardhat run apps/web/scripts/verify-backend-workflow.ts` also checks metadata authorization against actual production contracts on an isolated EVM.
 
 ## Phase 4B metadata and private Storage
 
-See [Phase 4B](docs/PHASE4B.md) for the additive migration, API inventory, exact private-bucket/environment setup, authorization/retention rules, failure recovery and manual verification. Preserve the existing populated `.env.local`; add only the server-only Storage variables shown in `.env.example`. Never copy the example over working credentials. The hosted Phase 4B SQL migration was applied successfully; hosted object upload/download still requires Storage configuration and verification.
+See [Phase 4B](docs/PHASE4B.md) for the additive migration, API inventory, private-bucket setup, authorization/retention rules and failure recovery. Preserve the existing populated `.env.local`; never copy the example over working credentials. The user reports hosted Phase 4B migration and private upload/download manually verified. Phase 5 automated verification uses isolated SQL/byte storage and does not mutate hosted data.
 
 ```powershell
 npm.cmd --prefix apps/web run db:migrate -- --check
@@ -166,7 +168,7 @@ npm.cmd run web:dev
 
 Sign in separately from wallet connection. Metadata synchronization follows the actual creation receipt; retry an existing project's metadata after backend failure without another chain transaction. Freelancer deliverables and primary opening/response files use SHA-256 exact-byte hashes accepted by the unchanged bytes32 interfaces. Supplemental evidence stays off-chain and closes strictly at the on-chain response deadline. Participants and assigned jurors use authenticated integrity-checked downloads; unrelated wallets are denied. All uploaded objects are retained, including unlinked drafts, to avoid racing pending chain references. No malware scanning or end-to-end encryption is provided.
 
-Run `npx.cmd hardhat run apps/web/scripts/verify-files-workflow.ts` in addition to the three existing EVM verification scripts. It uses actual contracts with isolated SQL/byte storage, never hosted credentials. Keep the existing privileged local database URL working; dedicated runtime-role separation and broader hardening remain Phase 5 review items. Stop here for review.
+Run `npx.cmd hardhat run apps/web/scripts/verify-files-workflow.ts` in addition to the three existing EVM verification scripts. It now combines SIWE/profile/metadata/private-file verification with every settlement outcome, using actual contracts and isolated SQL/byte storage. Keep the working database URL until a restricted runtime URI passes `db:runtime:check` and an authenticated smoke test. See [Phase 5](docs/PHASE5.md) for all verification results and remaining manual steps. Stop after Phase 5 for review.
 
 ## Limits and security
 

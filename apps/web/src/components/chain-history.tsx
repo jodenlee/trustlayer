@@ -71,7 +71,7 @@ export function ChainHistory({
             </Button>
           }
         />
-      ) : !history.deployment.ready ? (
+      ) : !history.deployment.readable ? (
         <EmptyState
           title="Verify deployment to read history"
           description="No historical transactions are invented when data is unavailable."

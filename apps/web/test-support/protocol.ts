@@ -26,6 +26,9 @@ export function fixtureManifest(): LocalDeployment {
     ),
   ) as LocalDeployment;
   manifest.ephemeral = false;
+  // Explicitly fictional chain identity; tests never bind to the developer's node.
+  delete manifest.hardhatInstanceId;
+  manifest.chainIdentity = { ...manifest.verifiedBlock };
   manifest.rpcUrl = "http://127.0.0.1:8545/";
   for (const name of CONTRACT_NAMES)
     manifest.contracts[name].runtimeCodeHash = keccak256(code);

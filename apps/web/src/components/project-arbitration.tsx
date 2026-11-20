@@ -46,7 +46,7 @@ export function ProjectArbitration({
     `opening:${project.id}:${index}`,
   );
   const view = read.view;
-  if (!read.deployment.ready) return null;
+  if (!read.deployment.readable) return null;
   if (read.error)
     return (
       <p role="alert" className="form-error mt-4">

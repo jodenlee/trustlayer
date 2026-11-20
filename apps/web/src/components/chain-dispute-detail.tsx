@@ -97,6 +97,12 @@ export function ChainDisputeDetail({ id }: { id: bigint }) {
   };
   return (
     <>
+      {!read.deployment.ready && (
+        <p role="status" className="small text-muted">
+          Rechecking the deployment. Showing the last verified case; transaction
+          actions are paused.
+        </p>
+      )}
       <Link className="back-link" href="/disputes">
         All disputes
       </Link>

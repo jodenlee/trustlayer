@@ -6,7 +6,7 @@ import { getAddress, zeroAddress } from "viem";
 import phase2D from "../ignition/modules/Phase2D.js";
 import { readCompiledContracts } from "../scripts/lib/artifacts.js";
 import { verifyDeployment } from "../scripts/lib/deployment.js";
-import { assertProvisioningRpc, PROVISION_RPC_URL, PROVISION_TARGETS, provisioningRecipients, provisionLocalTokens, TOKEN_SUPPLY, type ProvisioningEnvironment } from "../scripts/lib/provisioning.js";
+import { assertProvisioningRpc, PROVISION_RPC_URL, PROVISION_TARGETS, provisioningAmount, provisioningRecipients, provisionLocalTokens, TOKEN_SUPPLY, type ProvisioningEnvironment } from "../scripts/lib/provisioning.js";
 
 describe("Local-only MockUSD provisioning", async () => {
   const connection = await network.create();
@@ -21,10 +21,60 @@ describe("Local-only MockUSD provisioning", async () => {
     const messages: string[] = [];
     return { p, wallets, client, env, manifest, messages };
   }
-  async function fixture() { return connection.networkHelpers.loadFixture(baseFixture); }
+  async function fixture() { const f=await connection.networkHelpers.loadFixture(baseFixture); f.messages.length=0; return f; }
   async function run(f: Awaited<ReturnType<typeof fixture>>, env = f.env) {
     return provisionLocalTokens(connection.viem, f.manifest, compiled.MockUSD, env, PROVISION_RPC_URL, (message) => f.messages.push(message));
   }
+  it("validates exact six-decimal configurable token and eighteen-decimal native targets", () => {
+    assert.equal(provisioningAmount("0.000001", 6, 0n), 1n);
+    assert.equal(provisioningAmount("0.000000000000000001", 18, 0n), 1n);
+    for (const value of ["-1", "1e3", "0.0000001", "1.2.3", "", "Infinity"]) assert.throws(() => provisioningAmount(value, 6, 0n));
+  });
+  it("tops up explicit wallets with native ETH and configurable mUSD from existing unlocked funds, without repeat sends",async()=>{
+    const f=await fixture();
+    for(const wallet of f.wallets.slice(1,6)) await connection.provider.request({method:"hardhat_setBalance",params:[wallet.account.address,"0x0"]});
+    const env={...f.env,TRUSTLAYER_PROVISION_NATIVE:"true",TRUSTLAYER_ETH_TARGET:"1.5",TRUSTLAYER_CLIENT_MUSD:"123.456789"};
+    const result=await run(f,env);
+    assert.equal(result.recipients[0].balance,123456789n);
+    for(const r of result.recipients) assert.equal(await f.client.getBalance({address:r.address}),15n*10n**17n);
+    const nativeHashes=f.messages.filter(m=>m.includes("native ETH submitted"));
+    assert.equal(nativeHashes.length,5);
+    const block=await f.client.getBlockNumber({cacheTime:0});
+    assert.equal((await run(f,env)).transfers.length,0);
+    assert.equal(await f.client.getBlockNumber({cacheTime:0}),block);
+    assert.equal(f.messages.filter(m=>m.includes("native ETH submitted")).length,5);
+  });
+  it("rejects insufficient native funding and token supply before sending any top-up",async()=>{
+    const f=await fixture();
+    const before=await f.client.getTransactionCount({address:f.wallets[0].account.address});
+    await assert.rejects(run(f,{...f.env,TRUSTLAYER_PROVISION_NATIVE:"true",TRUSTLAYER_ETH_TARGET:"1000000"}),/Insufficient native ETH/);
+    await assert.rejects(run(f,{...f.env,TRUSTLAYER_CLIENT_MUSD:"1000001"}),/insufficient mUSD/);
+    assert.equal(await f.client.getTransactionCount({address:f.wallets[0].account.address}),before);
+  });
+  it("rejects malformed native targets and insufficient native funding before any token transfer", async () => {
+    const f=await fixture();
+    await assert.rejects(run(f,{...f.env,TRUSTLAYER_PROVISION_NATIVE:"true",TRUSTLAYER_ETH_TARGET:"-2"}));
+    await assert.rejects(run(f,{...f.env,TRUSTLAYER_PROVISION_NATIVE:"true",TRUSTLAYER_ETH_TARGET:"999999999"}),/Insufficient native ETH/);
+    assert.equal(await f.p.token.read.balanceOf([f.wallets[1].account.address]),0n);
+  });
+  it("preserves an existing manifest anchor after legitimate transactions and refuses another export", async () => {
+    const {mkdtemp,readFile,writeFile}=await import("node:fs/promises");
+    const {tmpdir}=await import("node:os");
+    const {join}=await import("node:path");
+    const {writeDeploymentExport}=await import("../scripts/lib/manifest-output.js");
+    const f=await fixture();
+    const path=join(await mkdtemp(join(tmpdir(),"trustlayer-manifest-")),"manifest.json");
+    const original={...f.manifest,ephemeral:true};
+    await writeDeploymentExport(path,original,f.client);
+    await run(f);
+    const head=await f.client.getBlock();
+    const newer={...original,verifiedBlock:{number:head.number.toString(),hash:head.hash!}};
+    assert.deepEqual((await writeDeploymentExport(path,newer,f.client)).verifiedBlock,original.verifiedBlock);
+    await assert.rejects(writeDeploymentExport(path,{...newer,deploymentId:"another"},f.client));
+    assert.deepEqual(JSON.parse(await readFile(path,"utf8")).verifiedBlock,original.verifiedBlock);
+    await writeFile(path,"corrupted");
+    await assert.rejects(writeDeploymentExport(path,newer,f.client));
+  });
   it("transfers the five exact targets from the original mint holder, confirms every hash and conserves fixed supply", async () => {
     const f = await fixture();
     const result = await run(f);

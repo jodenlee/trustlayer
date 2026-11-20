@@ -34,7 +34,7 @@ export function ChainDisputes({
   const rows = items.filter(
     (c) => filter === "All cases" || caseStage(c.dispute, data.now) === filter,
   );
-  const loaded = data.deployment.ready && data.isSuccess;
+  const loaded = data.deployment.readable && data.isSuccess;
   const actions = items.map((c) =>
     caseActions(c.dispute, account!, data.now, c.vote, c.claimable),
   );
@@ -119,7 +119,7 @@ export function ChainDisputes({
             ))}
           </div>
         </div>
-        {!data.deployment.ready ? (
+        {!data.deployment.readable ? (
           <EmptyState
             title="Verify your local connection"
             description="Case reads require a connected wallet and verified deployment. Sample cases are not substituted."

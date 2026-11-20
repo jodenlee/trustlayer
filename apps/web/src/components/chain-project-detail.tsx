@@ -229,6 +229,12 @@ export function ChainProjectDetail({ id }: { id: bigint }) {
         </p>
       )}
       {!read.deployment.ready && <LiveWalletCard />}
+      {view && !read.deployment.ready && (
+        <p role="status" className="small text-muted">
+          Rechecking the deployment. Showing the last verified project;
+          transaction actions are paused.
+        </p>
+      )}
       {read.deployment.ready && read.isError && (
         <Card>
           <EmptyState

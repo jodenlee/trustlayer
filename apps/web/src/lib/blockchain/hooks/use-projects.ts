@@ -34,7 +34,7 @@ export function useWalletProjects() {
     ...query,
     deployment,
     projects:
-      deployment.ready && !query.isError
+      deployment.readable && !query.isError
         ? (query.data?.pages.flatMap((p) => p.projects) ?? [])
         : [],
     scanned: query.data?.pages.reduce((n, p) => n + p.scanned, 0n) ?? 0n,
@@ -90,7 +90,8 @@ export function useChainProject(id: bigint) {
   return {
     ...query,
     deployment,
-    view: deployment.ready && !query.isError ? query.data : undefined,
+    isFetching: query.isFetching || deployment.isFetching,
+    view: deployment.readable && !query.isError ? query.data : undefined,
   };
 }
 export function useProjectHistory(
@@ -145,7 +146,7 @@ export function useProjectHistory(
     deployment,
     error: query.error ?? start.error,
     entries:
-      deployment.ready && !query.isError
+      deployment.readable && !query.isError
         ? (query.data?.pages.flatMap((p) => p.entries) ?? [])
         : [],
   };

@@ -35,7 +35,7 @@ export function useWalletCases() {
     ...query,
     deployment,
     cases:
-      deployment.ready && !query.isError
+      deployment.readable && !query.isError
         ? (query.data?.pages.flatMap((p) => p.cases) ?? [])
         : [],
     now: query.data?.pages[0]?.now ?? 0n,
@@ -98,7 +98,8 @@ export function useCaseDetail(id: bigint) {
   return {
     ...query,
     deployment,
-    view: deployment.ready && !query.isError ? query.data : undefined,
+    isFetching: query.isFetching || deployment.isFetching,
+    view: deployment.readable && !query.isError ? query.data : undefined,
   };
 }
 export function useOpening(project: ChainProject, index: number) {
@@ -148,7 +149,8 @@ export function useOpening(project: ChainProject, index: number) {
   return {
     ...query,
     deployment,
-    view: deployment.ready && !query.isError ? query.data : undefined,
+    isFetching: query.isFetching || deployment.isFetching,
+    view: deployment.readable && !query.isError ? query.data : undefined,
   };
 }
 export function useJuror() {
@@ -204,6 +206,7 @@ export function useJuror() {
   return {
     ...query,
     deployment,
-    view: deployment.ready && !query.isError ? query.data : undefined,
+    isFetching: query.isFetching || deployment.isFetching,
+    view: deployment.readable && !query.isError ? query.data : undefined,
   };
 }

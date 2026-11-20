@@ -34,12 +34,16 @@ export function useVerifiedDeployment() {
       return { manifest, contracts };
     },
   });
-  // Never expose previous data during invalidation, revalidation, account or chain changes.
+  // Writes pause during revalidation; read-only views may retain this actor's cache.
   const ready =
     isConnected && supported && query.isSuccess && !query.isFetching;
+  // Keep the same actor's last verified view mounted while rechecking. Writes
+  // still require ready and perform fresh RPC/wallet validation independently.
+  const readable = isConnected && supported && query.isSuccess;
   return {
     ...query,
     ready,
+    readable,
     verified: ready ? query.data : undefined,
     supported,
     address,
@@ -50,7 +54,8 @@ export function useVerifiedDeployment() {
 
 export function useTokenBalance() {
   const deployment = useVerifiedDeployment();
-  const { verified, address } = deployment;
+  const { address } = deployment;
+  const verified = deployment.data;
   const query = useQuery({
     queryKey: [
       "trustlayer",
@@ -59,7 +64,7 @@ export function useTokenBalance() {
       deployment.chainId,
       verified?.manifest.verifiedBlock.hash,
     ],
-    enabled: !!verified && !!address,
+    enabled: deployment.ready && !!verified && !!address,
     staleTime: 0,
     gcTime: 0,
     refetchInterval: 15_000,
@@ -87,16 +92,13 @@ export function useTokenBalance() {
   return {
     ...query,
     deployment,
-    token:
-      deployment.ready && query.isSuccess && !query.isFetching
-        ? query.data
-        : undefined,
+    token: deployment.readable && query.isSuccess ? query.data : undefined,
   };
 }
 
 export function useProtocolReads() {
   const deployment = useVerifiedDeployment();
-  const { verified } = deployment;
+  const verified = deployment.data;
   const query = useQuery({
     queryKey: [
       "trustlayer",
@@ -105,7 +107,7 @@ export function useProtocolReads() {
       deployment.chainId,
       verified?.manifest.verifiedBlock.hash,
     ],
-    enabled: !!verified,
+    enabled: deployment.ready && !!verified,
     staleTime: 0,
     gcTime: 0,
     refetchInterval: 15_000,
@@ -165,9 +167,6 @@ export function useProtocolReads() {
   return {
     ...query,
     deployment,
-    protocol:
-      deployment.ready && query.isSuccess && !query.isFetching
-        ? query.data
-        : undefined,
+    protocol: deployment.readable && query.isSuccess ? query.data : undefined,
   };
 }

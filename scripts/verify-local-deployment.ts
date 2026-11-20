@@ -9,7 +9,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { createPublicClient, http } from "viem";
-import { CONTRACT_NAMES, parseLocalDeployment } from "../packages/contracts/src/index.js";
+import { CONTRACT_NAMES, parseLocalDeployment, assertDeploymentOnChain } from "../packages/contracts/src/index.js";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const cli = resolve(root, "node_modules", "hardhat", "dist", "src", "cli.js");
@@ -55,7 +55,7 @@ try {
     await availablePort(); // Never attach to or stop an existing user's node.
     const deploymentId = `phase2e-${process.pid}-${Date.now()}-${index}`;
     const env = { ...process.env, LOCAL_RPC_URL: rpcUrl, TRUSTLAYER_DEPLOYMENT_ID: deploymentId,
-      TRUSTLAYER_VERIFY_FRESH: "true", TRUSTLAYER_EXPORT_EPHEMERAL: "true", CI: "true" };
+      TRUSTLAYER_VERIFY_FRESH: "true", TRUSTLAYER_EXPORT_EPHEMERAL: "true", TRUSTLAYER_EXPORT_PATH: resolve(root, ".local-chain", "verification", `${deploymentId}.json`), CI: "true" };
     const nodeLog = createWriteStream(resolve(output, `node-${index}.log`));
     const node = spawn(process.execPath, [cli, "node", "--hostname", "127.0.0.1", "--port", String(port), "--chain-id", "31337"],
       { cwd: root, env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"], signal: abort.signal });
@@ -79,11 +79,16 @@ try {
         await delay(200);
       }
       if (!ready) throw new Error("Fresh local node did not become ready at genesis");
+      const metadata = await rpc.request({method:"hardhat_metadata"} as never) as {instanceId:`0x${string}`};
+      if(runs.length) {
+        assert.notEqual(metadata.instanceId,runs[0].hardhatInstanceId,"Independent Hardhat processes reused an instance ID");
+        await assert.rejects(assertDeploymentOnChain(rpc,runs[0]),/Hardhat instance changed/);
+      }
       console.log(`Local run ${index}: fresh node ready; deploying the actual Phase2D Ignition module.`);
       const deployArgs = ["ignition", "deploy", "ignition/modules/Phase2D.ts", "--network", "localhost", "--deployment-id", deploymentId];
       await command(deployArgs, env, `deploy-${index}.log`);
       await command(["run", "scripts/export-contracts.ts", "--network", "localhost", "--no-compile"], env, `export-${index}.log`);
-      const manifestPath = resolve(root, "packages", "contracts", "generated", "deployments", "31337.json");
+      const manifestPath = env.TRUSTLAYER_EXPORT_PATH;
       const first = parseLocalDeployment(JSON.parse(await readFile(manifestPath, "utf8")));
       // Re-running the same journal must resume without re-sending any one-time configuration call.
       await command(deployArgs, env, `resume-${index}.log`);
@@ -91,7 +96,7 @@ try {
       const resumed = parseLocalDeployment(JSON.parse(await readFile(manifestPath, "utf8")));
       assert.deepEqual(resumed.contracts, first.contracts);
       assert.deepEqual(resumed.verifiedBlock, first.verifiedBlock, "Idempotent deployment mined additional transactions");
-      runs.push({ ...resumed, idempotentResumeVerified: true });
+      runs.push({ ...resumed, hardhatInstanceId:metadata.instanceId, idempotentResumeVerified: true });
       console.log(`Local run ${index}: all references, bytecode, zero balances, four one-time configuration events and idempotent resume verified.`);
     } finally {
       await stop(node);

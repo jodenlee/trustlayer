@@ -10,7 +10,7 @@ import { IntegrationError } from "./errors";
 export const LOCAL_RPC_URL = "http://127.0.0.1:8545";
 export const DEPLOYMENT_URL = "/deployments/31337.json";
 export const SETUP_GUIDANCE =
-  "Start the local node, deploy Phase2D, run npm.cmd run export:contracts, then npm.cmd --prefix apps/web run contracts:sync. See docs/PHASE3B.md.";
+  "Restore the matching local backup, or explicitly initialize a new deployment. Preserve historical metadata and the original export anchor; see docs/PHASE5.md. Then run npm.cmd --prefix apps/web run contracts:sync.";
 
 export function validateManifest(value: unknown): LocalDeployment {
   let manifest: LocalDeployment;
@@ -26,6 +26,11 @@ export function validateManifest(value: unknown): LocalDeployment {
     throw new IntegrationError(
       "deployment",
       `This is an ephemeral verification deployment, not a running local setup. ${SETUP_GUIDANCE}`,
+    );
+  if (!manifest.chainIdentity && !manifest.hardhatInstanceId)
+    throw new IntegrationError(
+      "deployment",
+      `This legacy export lacks a unique local-chain binding. Archive and upgrade it explicitly using the original anchor; do not reset the chain. ${SETUP_GUIDANCE}`,
     );
   const url = new URL(manifest.rpcUrl);
   if (
@@ -59,7 +64,8 @@ export async function loadManifest(signal?: AbortSignal) {
 export type VerificationClient = Pick<
   PublicClient,
   "getChainId" | "getBlock" | "getCode"
->;
+> &
+  Partial<Pick<PublicClient, "request">>;
 export async function verifyManifest(
   client: VerificationClient,
   manifest: LocalDeployment,

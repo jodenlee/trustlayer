@@ -48,6 +48,10 @@ export async function authBackend(
       : undefined,
   });
   const server = createServer(async (req, res) => {
+    // Playwright's route.fetch pool can race Node's short idle keep-alive
+    // timeout during clock-controlled/slow browser tests. Each isolated API
+    // exchange owns its connection; production HTTP behavior is unchanged.
+    res.setHeader("Connection", "close");
     const pathname = new URL(req.url!, origin).pathname;
     const parts = pathname.split("/");
     const endpoint =

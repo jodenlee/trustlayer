@@ -16,6 +16,56 @@ import {
 } from "../src/lib/blockchain/transactions";
 import { code, fixtureManifest } from "../test-support/protocol";
 import type { Hash } from "viem";
+test("stale MetaMask nonce failures give local recovery guidance without exposing RPC details", () => {
+  for (const error of [
+    { name: "NonceTooLowError" },
+    { cause: { message: "nonce too high: private RPC details" } },
+    { message: "nonce has already been used" },
+  ]) {
+    const result = describeError(error);
+    assert.equal(result.kind, "rpc");
+    assert.match(result.message, /confirmed fresh-chain reset/);
+    assert.match(result.message, /do not resend an uncertain transaction/);
+    assert.ok(!result.message.includes("private RPC details"));
+  }
+});
+test("random chain anchors reject deterministic fresh chains even when code and chain ID match", async () => {
+  const manifest = {
+    ...fixtureManifest(),
+    chainIdentity: { number: "1", hash: `0x${"2".repeat(64)}` as Hash },
+  };
+  await assert.rejects(
+    verifyManifest(
+      {
+        getChainId: async () => 31337,
+        getBlock: async () => ({ hash: manifest.verifiedBlock.hash }) as never,
+        getCode: async () => code,
+      },
+      manifest,
+    ),
+    /validation failed/,
+  );
+});
+test("legacy Hardhat process identity cannot silently authenticate a reset instance", async () => {
+  const manifest = {
+    ...fixtureManifest(),
+    hardhatInstanceId: `0x${"2".repeat(64)}` as Hash,
+  };
+  await assert.rejects(
+    verifyManifest(
+      {
+        getChainId: async () => 31337,
+        getBlock: async () => ({ hash: manifest.verifiedBlock.hash }) as never,
+        getCode: async () => code,
+        request: (async () => ({
+          instanceId: `0x${"3".repeat(64)}`,
+        })) as VerificationClient["request"],
+      },
+      manifest,
+    ),
+    /validation failed/,
+  );
+});
 
 test("accepts complete non-ephemeral local metadata and original generated ABIs", () => {
   const manifest = fixtureManifest();
@@ -26,6 +76,14 @@ const invalidCases: [
   string,
   (m: ReturnType<typeof fixtureManifest>) => unknown,
 ][] = [
+  [
+    "unbound legacy chain",
+    (m) => {
+      delete m.chainIdentity;
+      delete m.hardhatInstanceId;
+      return m;
+    },
+  ],
   ["missing", () => undefined],
   ["empty", () => ({})],
   ["ephemeral", (m) => ({ ...m, ephemeral: true })],
