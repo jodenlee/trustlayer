@@ -1,0 +1,14 @@
+{
+  "name": "@trustlayer/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./metadata": "./src/names.ts",
+    "./abi/*": "./generated/abi/*.json",
+    "./deployments/*": "./generated/deployments/*.json",
+    "./inventory": "./generated/inventory.json"
+  },
+  "peerDependencies": { "viem": "^2.47.6" }
+}

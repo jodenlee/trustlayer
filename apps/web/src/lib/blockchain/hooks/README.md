@@ -1,0 +1,9 @@
+# Verified contract boundary
+
+`useVerifiedDeployment` loads the public mirror of the generated export and validates schema, ABI hashes, persistent provenance, port 8545, chain ID, verification block and all five runtimes. Both the HTTP RPC and injected wallet must see the same deployment. Ephemeral verification exports are rejected.
+
+`useTokenBalance` and `useProtocolReads` execute typed Viem reads only after verification, with account/chain/block-anchor query keys. Values are hidden while verifying or after errors/disconnection. No preview IDs or fixture quantities enter these hooks.
+
+`useProtocolTransaction` adapts the imperative workflow controller to React. Phase 3C/3D callers submit reviewed escrow/token/arbitration/registry operations through fresh identity, state, balance, allowance, simulation and gas checks. Account/chain changes invalidate the visible context; original session records retain uncertain/submitted hashes for receipt checking. A submitted hash is never treated as a successful payment. Review dialogs bind the acting wallet and deployment snapshot. Message signing remains unused by product workflows. Phase 3D's ReviewedActionProvider stays mounted across read refreshes and disappearing action rows.
+
+`useWalletProjects`, `useChainProject`, `useWalletCases`, `useCaseDetail`, `useJuror`, `useOpening` and `useProjectHistory` use account/chain/deployment query keys. Discovery pages scan at most twenty IDs; event pages span at most two hundred blocks and identify their coverage. Historical juror membership comes from case records, not an unbounded active-case array. Non-sensitive form drafts and client transaction records remain memory-only. Phase 4B adds separately authenticated persistent metadata queries and private-file APIs; on-chain state remains authoritative and evidence bytes stay off-chain. See `docs/PHASE3D.md` and `docs/PHASE4B.md`. Stop after Phase 4B for review.

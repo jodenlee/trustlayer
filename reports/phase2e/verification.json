@@ -1,0 +1,134 @@
+{
+  "chainId": 31337,
+  "module": "TrustLayerPhase2D",
+  "reproducible": true,
+  "nodesStopped": true,
+  "runs": [
+    {
+      "schemaVersion": 1,
+      "module": "TrustLayerPhase2D",
+      "chainId": 31337,
+      "deploymentId": "phase2e-28096-1795167536144-1",
+      "rpcUrl": "http://127.0.0.1:18545/",
+      "ephemeral": true,
+      "verifiedAt": "2026-11-20T09:39:27.313Z",
+      "verifiedBlock": {
+        "number": "9",
+        "hash": "0x9f2c42beef248d930eefd09697718974fadb9a5ae2d547295ed29afd6c9352a7"
+      },
+      "token": {
+        "symbol": "mUSD",
+        "decimals": 6
+      },
+      "contracts": {
+        "MockUSD": {
+          "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+          "abiHash": "0x5654eb3db73d2c3d5d4b5a125749c6b75bf923508fa02f8778b0c9048a92194b",
+          "runtimeCodeHash": "0xcd27fe88d2e134e5f0a83e70bcfef2ddf64f0fa297d4944b1b73e848551d5107"
+        },
+        "TrustEscrow": {
+          "address": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
+          "abiHash": "0xfddfd580d15a12aff6de0e2ec1040a6c8cf57672f5a968d073405ce8d4874c72",
+          "runtimeCodeHash": "0x42568c842bc92968f367b81ac159f03ff2318b617de15f12ec56306dfaee3d9f"
+        },
+        "JurorRegistry": {
+          "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+          "abiHash": "0x37bca65ec5b8c0995986ea5803b9d4d32c4c539b2a18ec5d112b4f1f90f21f5e",
+          "runtimeCodeHash": "0x3aae6302e4e2b0b12bb9e6c0dec0ea1b5ae85365d4dd18d401868fc3885b11da"
+        },
+        "DisputeArbitration": {
+          "address": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
+          "abiHash": "0x503557bf16b8076bd386bc21df1451a34639580575c59fccf170c9f231c53f3f",
+          "runtimeCodeHash": "0xa49f3cf98cc63eb1f01211e062f726235597b21c1d88ea622afceb6df1187eb9"
+        },
+        "ProtocolTreasury": {
+          "address": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+          "abiHash": "0x8c43bc9fedad1df383035ff0e642e2d9fea0e829d796773ed87ac4d8f249d44f",
+          "runtimeCodeHash": "0xb0649c4b4c1417f8f26a3cbbe069237682943afdbef936ede9bf1339447a0a63"
+        }
+      },
+      "authorities": {
+        "treasuryOwner": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "escrowConfigurator": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "registryConfigurator": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "treasuryConfigurator": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+      },
+      "verification": {
+        "freshStateVerified": true,
+        "configurationEventCounts": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "repeatedConfigurationRejected": true,
+        "runtimeMatchesCompiledArtifacts": true
+      },
+      "hardhatInstanceId": "0x4c9a51f5b06f62db202beb88ea554e3bb0fb605534c711871b3a4cb11c601bb9",
+      "idempotentResumeVerified": true
+    },
+    {
+      "schemaVersion": 1,
+      "module": "TrustLayerPhase2D",
+      "chainId": 31337,
+      "deploymentId": "phase2e-28096-1795167587766-2",
+      "rpcUrl": "http://127.0.0.1:18545/",
+      "ephemeral": true,
+      "verifiedAt": "2026-11-20T09:40:15.851Z",
+      "verifiedBlock": {
+        "number": "9",
+        "hash": "0xeacaeaee9f8c369ecd6b933471a7ddc84507546d83a904136d0098e68eb01de7"
+      },
+      "token": {
+        "symbol": "mUSD",
+        "decimals": 6
+      },
+      "contracts": {
+        "MockUSD": {
+          "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+          "abiHash": "0x5654eb3db73d2c3d5d4b5a125749c6b75bf923508fa02f8778b0c9048a92194b",
+          "runtimeCodeHash": "0xcd27fe88d2e134e5f0a83e70bcfef2ddf64f0fa297d4944b1b73e848551d5107"
+        },
+        "TrustEscrow": {
+          "address": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
+          "abiHash": "0xfddfd580d15a12aff6de0e2ec1040a6c8cf57672f5a968d073405ce8d4874c72",
+          "runtimeCodeHash": "0x42568c842bc92968f367b81ac159f03ff2318b617de15f12ec56306dfaee3d9f"
+        },
+        "JurorRegistry": {
+          "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+          "abiHash": "0x37bca65ec5b8c0995986ea5803b9d4d32c4c539b2a18ec5d112b4f1f90f21f5e",
+          "runtimeCodeHash": "0x3aae6302e4e2b0b12bb9e6c0dec0ea1b5ae85365d4dd18d401868fc3885b11da"
+        },
+        "DisputeArbitration": {
+          "address": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
+          "abiHash": "0x503557bf16b8076bd386bc21df1451a34639580575c59fccf170c9f231c53f3f",
+          "runtimeCodeHash": "0xa49f3cf98cc63eb1f01211e062f726235597b21c1d88ea622afceb6df1187eb9"
+        },
+        "ProtocolTreasury": {
+          "address": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+          "abiHash": "0x8c43bc9fedad1df383035ff0e642e2d9fea0e829d796773ed87ac4d8f249d44f",
+          "runtimeCodeHash": "0xb0649c4b4c1417f8f26a3cbbe069237682943afdbef936ede9bf1339447a0a63"
+        }
+      },
+      "authorities": {
+        "treasuryOwner": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "escrowConfigurator": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "registryConfigurator": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "treasuryConfigurator": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+      },
+      "verification": {
+        "freshStateVerified": true,
+        "configurationEventCounts": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "repeatedConfigurationRejected": true,
+        "runtimeMatchesCompiledArtifacts": true
+      },
+      "hardhatInstanceId": "0x32e2535c39903df9970ab0b5394c136d5e55fa829df4f7e689347582e0c0c5b4",
+      "idempotentResumeVerified": true
+    }
+  ]
+}

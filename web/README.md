@@ -1,11 +1,12 @@
-# TrustLayer web workspace — Phase 3
+# Frontend location
 
-Create the Next.js app here *after* the escrow ABI and arbitration interfaces stabilize:
+The Next.js application lives in [`apps/web`](../apps/web), with its own npm package and lockfile. It includes the Phase 3A foundation and Phase 3B wallet/read integration. This historical directory remains as a pointer; do not initialize a second application here.
 
-```bash
-npx create-next-app@latest web --typescript --tailwind --eslint --app --src-dir --use-npm
+From the repository root:
+
+```powershell
+npm.cmd --prefix apps/web ci
+npm.cmd run web:dev
 ```
 
-If the empty `web` directory already exists, remove this placeholder folder before using create-next-app, or run it in a temporary folder and move the created files into `web/`.
-
-Do not store private keys in `NEXT_PUBLIC_*` variables or commit `.env.local`.
+Open http://127.0.0.1:3000. See [Phase 3B](../docs/PHASE3B.md) for persistent local-node setup, deployment exports, verification, and remaining work. Never put private keys in `NEXT_PUBLIC_*` variables or commit populated environment files.
