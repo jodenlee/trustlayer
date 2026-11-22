@@ -11,7 +11,7 @@ import {
 } from "@/lib/metadata-client";
 import type { PersistentProject } from "@/lib/files";
 import { deploymentScope } from "@/lib/blockchain/session";
-import { Button, Card, CardHeading, Field, Input } from "./ui";
+import { Button, Field, Input } from "./ui";
 import type { SessionMetadata } from "@/lib/blockchain/projects";
 
 export function usePersistentProject(
@@ -126,20 +126,20 @@ export function ProjectMetadataEditor({
     }
   }
   return (
-    <Card>
-      <CardHeading
-        title="Project metadata"
-        description="Descriptive text is stored off-chain. Blockchain state remains authoritative."
-      />
-      <div className="card-body pt-0!">
+    <div className="stack-sm">
+      <p className="small text-muted">
+        Names and descriptions are stored privately off-chain for the two
+        parties. Changing them never changes the on-chain agreement.
+      </p>
+      <div>
         {!auth.session ? (
           <p className="small text-muted">
-            Sign in with the participant wallet to save or retrieve private
-            project metadata. An existing on-chain project never needs to be
-            created again to retry metadata.
+            Sign in with a participant wallet to save project details. An
+            existing on-chain project never needs to be created again to retry
+            saving them.
           </p>
         ) : (
-          <form onSubmit={save} className="space-y-4">
+          <form onSubmit={save} className="form-stack">
             <Field id="saved-project-title" label="Saved project title">
               <Input
                 id="saved-project-title"
@@ -163,7 +163,7 @@ export function ProjectMetadataEditor({
               />
             </Field>
             {milestones.map((m, index) => (
-              <div key={index} className="space-y-3">
+              <div key={index} className="form-stack">
                 <Field
                   id={`saved-milestone-${index}`}
                   label={`Milestone ${index + 1} name`}
@@ -187,7 +187,7 @@ export function ProjectMetadataEditor({
                   label={`Milestone ${index + 1} description`}
                 >
                   <textarea
-                    className="input"
+                    className="textarea"
                     id={`saved-milestone-description-${index}`}
                     required
                     maxLength={4000}
@@ -205,9 +205,11 @@ export function ProjectMetadataEditor({
                 </Field>
               </div>
             ))}
-            <Button disabled={busy} type="submit">
-              {busy ? "Synchronizing metadata…" : "Save project metadata"}
-            </Button>
+            <div>
+              <Button disabled={busy} type="submit">
+                {busy ? "Saving details…" : "Save project metadata"}
+              </Button>
+            </div>
             {message && (
               <p aria-live="polite" className="small">
                 {message}
@@ -216,6 +218,6 @@ export function ProjectMetadataEditor({
           </form>
         )}
       </div>
-    </Card>
+    </div>
   );
 }

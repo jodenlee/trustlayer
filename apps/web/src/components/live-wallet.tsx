@@ -1,6 +1,7 @@
 "use client";
 import { useConnection } from "wagmi";
-import { RefreshCw, Wallet } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { RefreshCw } from "lucide-react";
 import { CONTRACT_NAMES } from "@trustlayer/contracts/metadata";
 import { localChain } from "@/lib/blockchain/config";
 import { LOCAL_RPC_URL } from "@/lib/blockchain/deployment";
@@ -8,190 +9,145 @@ import { describeError } from "@/lib/blockchain/errors";
 import {
   useProtocolReads,
   useTokenBalance,
-  useVerifiedDeployment,
 } from "@/lib/blockchain/hooks/use-protocol";
-import { Button, Card, CardHeading } from "./ui";
+import {
+  Button,
+  Card,
+  CardBody,
+  CardHeading,
+  Disclosure,
+  Hash,
+  KeyValue,
+} from "./ui";
 import { Money } from "./money";
-import { usePreview } from "./providers";
-import { SwitchNetworkButton, walletNetwork } from "./wallet";
+import { useUi } from "./providers";
+import { useBackendAuth } from "./auth-provider";
+import { walletNetwork } from "./wallet";
 
-function DeploymentFeedback({
-  deployment,
-}: {
-  deployment: ReturnType<typeof useVerifiedDeployment>;
-}) {
-  if (!deployment.isConnected)
-    return (
-      <p className="small text-muted">
-        Connect a wallet to validate your local deployment. No account data has
-        been loaded.
-      </p>
-    );
-  if (!deployment.supported)
-    return (
-      <div className="wallet-warning">
-        <p className="small mb-3">
-          Unsupported network: {walletNetwork(deployment.chainId)}. Local
-          contract reads are paused.
-        </p>
-        <SwitchNetworkButton />
-      </div>
-    );
-  if (deployment.isError)
-    return (
-      <div
-        className="wallet-warning"
-        role="alert"
-        aria-label="Deployment setup"
-      >
-        <h3>
-          {describeError(deployment.error).kind === "deployment"
-            ? "Local setup required"
-            : "Local blockchain unavailable"}
-        </h3>
-        <p className="small mt-2">{describeError(deployment.error).message}</p>
-        <Button
-          className="mt-3"
-          variant="secondary"
-          onClick={() => void deployment.refetch()}
-        >
-          <RefreshCw size={13} />
-          Retry verification
-        </Button>
-      </div>
-    );
-  if (!deployment.ready)
-    return (
-      <p className="small text-muted" role="status">
-        Checking local deployment and wallet network…
-      </p>
-    );
-  return null;
-}
-export function LiveWalletCard() {
+/** Signed-in wallet, network verification, balance and session controls. */
+export function WalletSummary() {
   const connection = useConnection();
-  const { openWallet } = usePreview();
+  const { openWallet } = useUi();
+  const auth = useBackendAuth();
+  const router = useRouter();
   const balance = useTokenBalance();
   const { deployment, token } = balance;
   return (
-    <Card className="live-wallet">
-      <CardHeading
-        title="Live wallet"
-        description="Connected account data · separate from sample projects"
-        action={<Wallet size={18} className="text-muted" />}
-      />
-      <div className="card-body pt-0!">
-        <dl className="summary-list">
-          <div>
-            <dt>Wallet</dt>
-            <dd>{connection.isConnected ? "Connected" : "Not connected"}</dd>
-          </div>
-          {connection.address && (
-            <div>
-              <dt>Account address</dt>
-              <dd>
-                <code className="wallet-address">{connection.address}</code>
-              </dd>
-            </div>
-          )}
-          <div>
-            <dt>Active network</dt>
-            <dd>
-              {connection.isConnected
+    <Card label="Wallet and session">
+      <CardHeading title="Wallet & session" />
+      <CardBody className="pt-2!">
+        <KeyValue
+          items={[
+            {
+              label: "Account",
+              value: connection.address ? (
+                <Hash value={connection.address} label="Copy address" />
+              ) : (
+                "Not connected"
+              ),
+            },
+            {
+              label: "Network",
+              value: connection.isConnected
                 ? walletNetwork(connection.chainId)
-                : "Not connected"}
-            </dd>
-          </div>
-          <div>
-            <dt>Local RPC</dt>
-            <dd>{LOCAL_RPC_URL}</dd>
-          </div>
-          <div>
-            <dt>Deployment</dt>
-            <dd>
-              {deployment.ready ? "Verified on RPC & wallet" : "Not verified"}
-            </dd>
-          </div>
-          <div>
-            <dt>mUSD balance</dt>
-            <dd data-testid="live-balance">
-              {token ? <Money amount={token.balance} /> : "—"}
-            </dd>
-          </div>
-          {token && (
-            <div>
-              <dt>Token metadata</dt>
-              <dd>
-                {token.symbol} · {token.decimals} decimals · on-chain
-              </dd>
-            </div>
-          )}
-        </dl>
-        <div className="mt-4">
-          <DeploymentFeedback deployment={deployment} />
-          {deployment.ready && balance.isError && (
-            <p
-              role="alert"
-              aria-label="Token read error"
-              className="form-error"
-            >
-              Token read failed. {describeError(balance.error).message}
-            </p>
-          )}
-          {deployment.ready && balance.isFetching && (
-            <p className="small text-muted" role="status">
-              Loading token balance…
-            </p>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-3 mt-5">
+                : "Not connected",
+            },
+            {
+              label: "Deployment",
+              value: deployment.ready
+                ? "Verified on RPC & wallet"
+                : "Not verified",
+            },
+            {
+              label: "mUSD balance",
+              value: token ? <Money amount={token.balance} /> : "—",
+              testId: "live-balance",
+            },
+            {
+              label: "Session expires",
+              value: auth.session
+                ? new Date(auth.session.expiresAt).toLocaleString()
+                : "—",
+            },
+          ]}
+        />
+        {deployment.ready && balance.isError && (
+          <p
+            role="alert"
+            aria-label="Token read error"
+            className="form-error mt-3"
+          >
+            Token read failed. {describeError(balance.error).message}
+          </p>
+        )}
+        <div className="button-row mt-4">
           <Button variant="secondary" onClick={openWallet}>
-            {connection.isConnected ? "Manage wallet" : "Connect wallet"}
+            Manage wallet
           </Button>
           {token && (
             <Button variant="ghost" onClick={() => void balance.refetch()}>
-              <RefreshCw size={13} />
+              <RefreshCw size={13} aria-hidden="true" />
               Refresh balance
             </Button>
           )}
+          <Button
+            variant="ghost"
+            className="ml-auto"
+            disabled={auth.busy}
+            onClick={async () => {
+              await auth.logout();
+              router.replace("/sign-in");
+            }}
+          >
+            Sign out
+          </Button>
         </div>
-      </div>
+      </CardBody>
     </Card>
   );
 }
-export function ProtocolConnectionCard() {
+/** Public protocol state and verified contract addresses, for troubleshooting. */
+export function ProtocolDetails() {
   const reads = useProtocolReads();
   const { deployment, protocol } = reads;
+  const token = useTokenBalance().token;
   return (
-    <Card>
-      <CardHeading
-        title="Verified protocol"
-        description={`${localChain.name} · 31337 · live public contract reads`}
-      />
-      <div className="card-body pt-0!">
-        <DeploymentFeedback deployment={deployment} />
-        {deployment.verified && (
-          <dl className="summary-list contract-addresses">
-            {CONTRACT_NAMES.map((name) => (
-              <div key={name}>
-                <dt>{name}</dt>
-                <dd>
-                  <code className="wallet-address">
-                    {deployment.verified!.contracts[name].address}
-                  </code>
-                </dd>
-              </div>
-            ))}
-          </dl>
-        )}
+    <Disclosure
+      summary="Protocol & contract details"
+      hint={`${localChain.name} · ${localChain.id}`}
+    >
+      <div className="stack-sm">
+        <KeyValue
+          stacked
+          items={[
+            { label: "RPC endpoint", value: LOCAL_RPC_URL },
+            ...(token
+              ? [
+                  {
+                    label: "Token metadata",
+                    value: `${token.symbol} · ${token.decimals} decimals · on-chain`,
+                  },
+                ]
+              : []),
+            ...(deployment.verified
+              ? CONTRACT_NAMES.map((name) => ({
+                  label: name,
+                  value: (
+                    <Hash
+                      value={deployment.verified!.contracts[name].address}
+                      full
+                    />
+                  ),
+                }))
+              : []),
+          ]}
+        />
         {deployment.ready && reads.isFetching && (
-          <p className="small text-muted mt-4">
-            Loading public protocol state…
-          </p>
+          <p className="small text-muted">Loading public protocol state…</p>
         )}
         {deployment.ready && reads.isError && (
           <p
-            className="form-error mt-4"
+            className="form-error"
             role="alert"
             aria-label="Protocol read error"
           >
@@ -200,55 +156,51 @@ export function ProtocolConnectionCard() {
         )}
         {protocol && (
           <>
-            <dl className="summary-list mt-4">
-              <div>
-                <dt>Escrow liability</dt>
-                <dd>
-                  <Money amount={protocol.escrowLiability} />
-                </dd>
-              </div>
-              <div>
-                <dt>Juror stake / locked</dt>
-                <dd>
-                  <Money amount={protocol.totalStaked} /> /{" "}
-                  <Money amount={protocol.totalLockedStake} />
-                </dd>
-              </div>
-              <div>
-                <dt>Reserved juror rewards</dt>
-                <dd>
-                  <Money amount={protocol.reservedRewards} />
-                </dd>
-              </div>
-              <div>
-                <dt>Treasury revenue</dt>
-                <dd>
-                  <Money amount={protocol.treasuryRevenue} />
-                </dd>
-              </div>
-              <div>
-                <dt>Arbitration configured</dt>
-                <dd>{protocol.arbitrationConfigured ? "Yes" : "No"}</dd>
-              </div>
-              <div>
-                <dt>Current treasury owner</dt>
-                <dd>
-                  <code className="wallet-address">
-                    {protocol.treasuryOwner}
-                  </code>
-                </dd>
-              </div>
-            </dl>
-            <Button
-              className="mt-4"
-              variant="secondary"
-              onClick={() => void reads.refetch()}
-            >
-              Refresh protocol reads
-            </Button>
+            <KeyValue
+              items={[
+                {
+                  label: "Escrow liability",
+                  value: <Money amount={protocol.escrowLiability} />,
+                },
+                {
+                  label: "Juror stake / locked",
+                  value: (
+                    <>
+                      <Money amount={protocol.totalStaked} /> /{" "}
+                      <Money amount={protocol.totalLockedStake} />
+                    </>
+                  ),
+                },
+                {
+                  label: "Reserved juror rewards",
+                  value: <Money amount={protocol.reservedRewards} />,
+                },
+                {
+                  label: "Treasury revenue",
+                  value: <Money amount={protocol.treasuryRevenue} />,
+                },
+                {
+                  label: "Arbitration configured",
+                  value: protocol.arbitrationConfigured ? "Yes" : "No",
+                },
+                {
+                  label: "Current treasury owner",
+                  value: <Hash value={protocol.treasuryOwner} />,
+                },
+              ]}
+            />
+            <div>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void reads.refetch()}
+              >
+                Refresh protocol reads
+              </Button>
+            </div>
           </>
         )}
       </div>
-    </Card>
+    </Disclosure>
   );
 }

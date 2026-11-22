@@ -1,11 +1,13 @@
 import { ButtonLink } from "@/components/ui";
+import { Logo } from "@/components/brand";
 export default function NotFound() {
   return (
     <main className="standalone">
-      <p className="eyebrow">404 · PAGE NOT FOUND</p>
-      <h1>That page is out of scope.</h1>
+      <Logo />
+      <p className="eyebrow-text mt-6">404</p>
+      <h1>Page not found</h1>
       <p className="text-muted">
-        The project or case may not exist in this preview.
+        This page doesn’t exist, or the project or dispute ID is not valid.
       </p>
       <ButtonLink href="/dashboard">Back to overview</ButtonLink>
     </main>

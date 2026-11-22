@@ -92,5 +92,8 @@ export function rpcFixture(
       result,
     });
   }
+  // Read-only account/mempool view: no sent transactions, empty pool.
+  if (method === "eth_getTransactionCount") return "0x0";
+  if (method === "txpool_content") return { pending: {}, queued: {} };
   throw new Error(`Unexpected test RPC method ${method}`);
 }

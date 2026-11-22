@@ -110,6 +110,10 @@ export function escrowRpc(
       ];
   let deferReceipts = false;
   let rejectNext = false;
+  // Per-sender mined nonces and nonce-gapped (queued, never mined) transactions.
+  const sent = new Map<string, number>();
+  const queued = new Map<Hex, Record<string, unknown>>();
+  let gapNext = 0;
   let revertNext = false;
   let rpcFailure: string | undefined;
   let contractHook:
@@ -390,12 +394,53 @@ export function escrowRpc(
       const request = params[0] as { to: string; data: Hex; from?: Address };
       return call(request.to, request.data, false, request.from);
     }
+    if (method === "eth_getTransactionCount")
+      return hex(sent.get(String(params[0]).toLowerCase()) ?? 0);
+    if (method === "txpool_content") {
+      const byFrom: Record<string, Record<string, unknown>> = {};
+      for (const tx of queued.values()) {
+        const from = String(tx.from).toLowerCase();
+        byFrom[from] = {
+          ...byFrom[from],
+          [String(BigInt(tx.nonce as string))]: tx,
+        };
+      }
+      return { pending: {}, queued: byFrom };
+    }
     if (method === "eth_sendTransaction") {
       if (rejectNext) {
         rejectNext = false;
         throw { code: 4001, message: "User rejected transaction" };
       }
       const request = params[0] as { to: string; data: Hex; from: Address };
+      const sender = request.from.toLowerCase();
+      if (gapNext) {
+        // Simulates a wallet signing with a stale, too-high nonce: the node
+        // accepts it into its queue, never mines it and never applies it.
+        const tx = hash(++nonce);
+        queued.set(tx, {
+          hash: tx,
+          from: request.from,
+          to: request.to,
+          input: request.data,
+          value: "0x0",
+          nonce: hex((sent.get(sender) ?? 0) + gapNext),
+          gas: "0x186a0",
+          gasPrice: "0x3b9aca00",
+          maxFeePerGas: "0x77359400",
+          maxPriorityFeePerGas: "0x3b9aca00",
+          chainId: "0x7a69",
+          type: "0x2",
+          blockNumber: null,
+          blockHash: null,
+          transactionIndex: null,
+          accessList: [],
+        });
+        gapNext = 0;
+        return tx;
+      }
+      const senderNonce = sent.get(sender) ?? 0;
+      sent.set(sender, senderNonce + 1);
       const tx = hash(++nonce);
       block++;
       now++;
@@ -437,7 +482,7 @@ export function escrowRpc(
         to: request.to,
         input: request.data,
         value: "0x0",
-        nonce: hex(nonce),
+        nonce: hex(senderNonce),
         gas: "0x186a0",
         gasPrice: "0x3b9aca00",
         maxFeePerGas: "0x77359400",
@@ -452,7 +497,11 @@ export function escrowRpc(
       return tx;
     }
     if (method === "eth_getTransactionByHash")
-      return transactions.get(params[0] as Hex) ?? null;
+      return (
+        transactions.get(params[0] as Hex) ??
+        queued.get(params[0] as Hex) ??
+        null
+      );
     if (method === "eth_getTransactionReceipt")
       return deferReceipts ? null : (receipts.get(params[0] as Hex) ?? null);
     if (method === "eth_getLogs") {
@@ -509,6 +558,13 @@ export function escrowRpc(
     reject: () => {
       rejectNext = true;
     },
+    /** Next transaction is signed `gap` nonces ahead and stays queued. */
+    nonceGapNext: (gap = 4) => {
+      gapNext = gap;
+    },
+    queued: () => [...queued.keys()],
+    /** Operator drops queued transactions (explicit recovery). */
+    dropQueued: () => queued.clear(),
     revert: () => {
       revertNext = true;
     },

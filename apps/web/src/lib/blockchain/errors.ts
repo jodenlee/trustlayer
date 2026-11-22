@@ -5,6 +5,7 @@ export type IntegrationErrorKind =
   | "deployment"
   | "rpc"
   | "reverted"
+  | "nonce"
   | "unknown";
 export class IntegrationError extends Error {
   constructor(

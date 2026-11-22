@@ -14,15 +14,45 @@ import {
   sessionMatches,
   type BackendSession,
 } from "@/lib/auth-client";
+import { describeError } from "@/lib/blockchain/errors";
 
 interface AuthState {
   session: BackendSession | null;
   configured: boolean;
   busy: boolean;
+  /** True until the wallet's first restore cycle and the session read settle. */
   checking: boolean;
+  /** The most recent session end was an explicit sign-out in this tab. */
+  signedOut: boolean;
   error: string;
   signIn: () => Promise<void>;
   logout: () => Promise<void>;
+}
+/**
+ * With SSR hydration, wagmi reports "disconnected" until its asynchronous
+ * reconnect starts. Treat the wallet as settled only after that first restore
+ * cycle (or an explicit connection) so guards never redirect prematurely.
+ */
+function useWalletSettled(config: ReturnType<typeof useConfig>) {
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    if (settled) return;
+    let sawRestore = false;
+    const check = (status: string) => {
+      if (status === "connecting" || status === "reconnecting")
+        sawRestore = true;
+      else if (status === "connected" || sawRestore) setSettled(true);
+    };
+    check(config.state.status);
+    const unsubscribe = config.subscribe((s) => s.status, check);
+    // Defensive upper bound; reconnect always runs on mount in this app.
+    const timer = setTimeout(() => setSettled(true), 6000);
+    return () => {
+      unsubscribe();
+      clearTimeout(timer);
+    };
+  }, [config, settled]);
+  return settled;
 }
 const Context = createContext<AuthState | null>(null);
 export function useBackendAuth() {
@@ -53,6 +83,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [signedOut, setSignedOut] = useState(false);
+  const walletSettled = useWalletSettled(config);
   const generation = useRef(0);
   const previous = useRef("disconnected");
   const revokeRequired = useRef(false);
@@ -122,7 +154,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("focus", focus);
     };
   }, [config, scope, busy]);
-  const checking = restoring || state.scope !== scope || state.checking;
+  const checking =
+    !walletSettled || restoring || state.scope !== scope || state.checking;
   const session =
     !checking &&
     connection.status === "connected" &&
@@ -184,8 +217,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         configured: true,
         checking: false,
       });
+      setSignedOut(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Wallet sign-in failed.");
+      setError(
+        describeError(e).kind === "rejected"
+          ? "You declined the signature request. Nothing was signed and no transaction was sent."
+          : e instanceof Error
+            ? e.message
+            : "Wallet sign-in failed.",
+      );
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -200,6 +240,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ++generation.current;
     try {
       await backendRequest("/api/auth/logout", "POST");
+      setSignedOut(true);
       setState({ scope, session: null, configured: true, checking: false });
     } catch (e) {
       setError(
@@ -218,6 +259,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session,
         configured: state.configured,
         checking,
+        signedOut,
         busy,
         error,
         signIn,

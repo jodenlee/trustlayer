@@ -1,3 +1,3 @@
-import { JurorWorkspace } from "@/components/juror";
-export const metadata = { title: "Juror workspace" };
-export default JurorWorkspace;
+import { ChainJuror } from "@/components/chain-juror";
+export const metadata = { title: "Jury" };
+export default ChainJuror;

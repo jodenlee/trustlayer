@@ -1,48 +1,299 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import { installRpc, installWallet } from "./wallet-fixture";
+import {
+  completeSignIn,
+  installAuth,
+  signIn,
+  switchAccount,
+} from "./auth-fixture";
+import { escrowRpc } from "../test-support/escrow-rpc";
+import { accountB } from "../test-support/protocol";
 
-const routes = [
-  ["/", "Good work deserves a clear path to payment."],
-  ["/dashboard", "Welcome back, Alex"],
+const protectedRoutes = [
+  ["/dashboard", "Overview"],
   ["/projects", "Projects"],
-  ["/projects/new", "Start with a clear agreement"],
-  ["/projects/tl-1042", "Brand & website refresh"],
+  ["/projects/new", "New project"],
   ["/disputes", "Disputes"],
-  ["/disputes/dp-2001", "Illustration set"],
-  ["/juror", "An independent perspective"],
+  ["/juror", "Jury"],
   ["/transactions", "Transactions"],
-  ["/settings", "Make yourself at home"],
+  ["/settings", "Settings"],
 ] as const;
 
-for (const [path, heading] of routes) {
-  test(`renders ${path} without hydration errors or page overflow`, async ({
+function noOverflow(page: Page) {
+  return expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    )
+    .toBe(true);
+}
+function collectErrors(page: Page) {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+  return errors;
+}
+
+for (const [path] of protectedRoutes)
+  test(`signed-out visit to ${path} redirects to sign-in with its destination`, async ({
     page,
   }) => {
-    const errors: string[] = [];
-    page.on("pageerror", (error) => errors.push(error.message));
-    page.on("console", (message) => {
-      if (message.type() === "error") errors.push(message.text());
-    });
+    await installWallet(page);
+    await installRpc(page);
+    await installAuth(page);
+    const response = await page.goto(`${path}?tab=1`);
+    // The server proxy redirects before any protected page is rendered.
+    expect(response?.request().redirectedFrom()?.url()).toContain(path);
+    await expect(page).toHaveURL(
+      `/sign-in?next=${encodeURIComponent(`${path}?tab=1`)}`,
+    );
+    await expect(
+      page.getByRole("heading", { name: "Sign in to TrustLayer" }),
+    ).toBeVisible();
+    await expect(page.getByRole("navigation")).toHaveCount(0);
+  });
+
+test("root sends signed-out visitors to sign-in", async ({ page }) => {
+  await page.goto("/");
+  await expect(page).toHaveURL("/sign-in");
+});
+
+test("sign-in page renders cleanly and never signs automatically", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await installWallet(page, { persistAuthorization: true });
+  await installRpc(page);
+  await installAuth(page);
+  await page.goto("/sign-in");
+  await page
+    .getByRole("button", { name: "Connect wallet", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Sign in with Ethereum", exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Sign in with Ethereum", exact: true }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      window.__testWallet.calls.includes("personal_sign"),
+    ),
+  ).toBe(false);
+  await noOverflow(page);
+  expect(errors).toEqual([]);
+});
+
+test("signing in returns to the intended page and every protected page renders", async ({
+  page,
+}) => {
+  const errors = collectErrors(page);
+  await installWallet(page, { persistAuthorization: true });
+  await installRpc(page);
+  const auth = await installAuth(page);
+  await signIn(page, "/transactions");
+  expect(auth.verifications()).toBe(1);
+  await expect(
+    page.getByRole("heading", { name: "Transactions", exact: true }),
+  ).toBeVisible();
+  for (const [path, heading] of protectedRoutes) {
     await page.goto(path);
     await expect(
       page.getByRole("heading", { name: heading, exact: true }),
     ).toBeVisible();
-    if (path !== "/")
-      await expect(
-        page.getByText("Fictional sample data", { exact: false }),
-      ).toBeVisible();
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () => document.documentElement.scrollWidth <= window.innerWidth,
-        ),
-      )
-      .toBe(true);
-    expect(errors).toEqual([]);
+    await noOverflow(page);
+  }
+  expect(auth.verifications()).toBe(1);
+  expect(errors).toEqual([]);
+});
+
+test("a valid session is restored after refresh without another signature", async ({
+  page,
+}) => {
+  await installWallet(page, { persistAuthorization: true });
+  await installRpc(page);
+  const auth = await installAuth(page);
+  await signIn(page, "/projects");
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Projects", exact: true }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/projects$/);
+  expect(auth.verifications()).toBe(1);
+});
+
+test("restoration waits for the wallet before deciding", async ({ page }) => {
+  await installWallet(page, {
+    persistAuthorization: true,
+    deferReconnect: true,
   });
-}
+  await installRpc(page);
+  await installAuth(page);
+  await signIn(page, "/settings");
+  await page.reload();
+  await expect(page.getByText("Restoring your session…")).toBeVisible();
+  await expect(page).toHaveURL(/\/settings$/);
+  await page.evaluate(() => window.__testWallet.resumeReconnection());
+  await expect(
+    page.getByRole("heading", { name: "Settings", exact: true }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/settings$/);
+});
+
+test("rejected signature is explained and nothing is signed in", async ({
+  page,
+}) => {
+  await installWallet(page);
+  await installRpc(page);
+  await page.exposeFunction("__signBackendMessage", async () => {
+    throw new Error("User rejected sign-in request");
+  });
+  const auth = await installAuth(page, { exposeSigner: false });
+  await page.goto("/dashboard");
+  await page
+    .getByRole("button", { name: "Connect wallet", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Sign in with Ethereum", exact: true })
+    .click();
+  await expect(
+    page.getByRole("alert", { name: "Backend authentication error" }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/sign-in/);
+  expect(auth.verifications()).toBe(0);
+});
+
+test("missing wallet extension shows setup guidance", async ({ page }) => {
+  await installAuth(page);
+  await page.goto("/sign-in");
+  await expect(
+    page.getByRole("heading", { name: "No browser wallet found" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Sign in with Ethereum" }),
+  ).toHaveCount(0);
+});
+
+test("wrong network must be switched before signing in", async ({ page }) => {
+  await installWallet(page, { chainId: 11155111 });
+  await installRpc(page);
+  await installAuth(page);
+  await page.goto("/sign-in");
+  await page
+    .getByRole("button", { name: "Connect wallet", exact: true })
+    .click();
+  await expect(page.getByText(/Your wallet is on Sepolia/)).toBeVisible();
+  await page.getByRole("button", { name: "Switch to Hardhat Local" }).click();
+  await expect(
+    page.getByRole("button", { name: "Sign in with Ethereum", exact: true }),
+  ).toBeVisible();
+});
+
+test("unconfigured backend blocks sign-in with a clear message", async ({
+  page,
+}) => {
+  await installWallet(page);
+  await installRpc(page);
+  await installAuth(page, { configured: false });
+  await page.goto("/sign-in");
+  await page
+    .getByRole("button", { name: "Connect wallet", exact: true })
+    .click();
+  await expect(
+    page.getByRole("alert", { name: "Backend setup" }),
+  ).toContainText("Sign-in is unavailable");
+});
+
+test("switching wallet accounts ends the session and keeps the destination", async ({
+  page,
+}) => {
+  await installWallet(page);
+  await installRpc(page);
+  const auth = await installAuth(page);
+  await signIn(page, "/settings");
+  await page.evaluate((next) => window.__testWallet.account(next), accountB);
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fsettings&ended=1/);
+  await expect(page.getByText(/Your session ended/)).toBeVisible();
+  expect(auth.logouts()).toBeGreaterThan(0);
+  await completeSignIn(page, "/settings");
+  expect(auth.sessionFor()).toBe(accountB.toLowerCase());
+});
+
+test("explicit sign-out returns to sign-in and does not re-sign", async ({
+  page,
+}, testInfo) => {
+  await installWallet(page);
+  await installRpc(page);
+  const auth = await installAuth(page);
+  await signIn(page, "/dashboard");
+  if (testInfo.project.name !== "desktop")
+    await page.getByRole("button", { name: "Open navigation" }).click();
+  await page
+    .getByRole("button", { name: "Sign out", exact: true })
+    .filter({ visible: true })
+    .click();
+  await expect(page).toHaveURL("/sign-in");
+  await expect(
+    page.getByRole("button", { name: "Sign in with Ethereum", exact: true }),
+  ).toBeVisible();
+  expect(auth.verifications()).toBe(1);
+  // Protected pages are refused again until a new signature.
+  await page.goto("/projects");
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fprojects/);
+});
+
+test("an expired session redirects to sign-in on the next check", async ({
+  page,
+}) => {
+  await installWallet(page);
+  await installRpc(page);
+  const auth = await installAuth(page);
+  await signIn(page, "/disputes");
+  await auth.expire();
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fdisputes&ended=1/);
+});
+
+test("a stale session cookie cannot unlock pages or cause a redirect loop", async ({
+  page,
+  baseURL,
+}) => {
+  await installWallet(page);
+  await installRpc(page);
+  await installAuth(page);
+  await page
+    .context()
+    .addCookies([{ name: "tl_session", value: "a".repeat(64), url: baseURL! }]);
+  await page.goto("/juror");
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fjuror/);
+  await expect(
+    page.getByRole("heading", { name: "Sign in to TrustLayer" }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jury" })).toHaveCount(0);
+});
+
+test("post-sign-in destinations cannot leave the application", async ({
+  page,
+}) => {
+  await installWallet(page);
+  await installRpc(page);
+  await installAuth(page);
+  await page.goto("/sign-in?next=https%3A%2F%2Fevil.example%2F");
+  await page
+    .getByRole("button", { name: "Connect wallet", exact: true })
+    .click();
+  await completeSignIn(page, "/dashboard");
+});
 
 test("navigation is usable on this viewport", async ({ page }, testInfo) => {
-  await page.goto("/dashboard");
+  await installWallet(page);
+  await installRpc(page);
+  await installAuth(page);
+  await signIn(page, "/dashboard");
   if (testInfo.project.name !== "desktop")
     await page.getByRole("button", { name: "Open navigation" }).click();
   const navigation = page
@@ -51,74 +302,18 @@ test("navigation is usable on this viewport", async ({ page }, testInfo) => {
   await navigation.getByRole("link", { name: "Projects", exact: true }).click();
   await expect(page).toHaveURL(/\/projects$/);
   await expect(
-    page.getByRole("heading", { name: "Projects", exact: true }),
+    page.getByRole("heading", { name: "No on-chain projects yet" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Completed", exact: true }).click();
-  await expect(
-    page.getByRole("link", { name: "Developer documentation", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("link", { name: "Brand & website refresh", exact: true }),
-  ).toHaveCount(0);
-  await page
-    .getByRole("textbox", { name: "Search projects" })
-    .fill("does not exist");
-  await expect(
-    page.getByRole("heading", { name: "No matching projects" }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Clear filters" }).click();
-  await expect(
-    page.getByRole("link", { name: "Brand & website refresh", exact: true }),
-  ).toBeVisible();
-});
-
-test("empty preview is honest and persists through navigation", async ({
-  page,
-}) => {
-  await page.goto("/dashboard");
-  await page.getByRole("button", { name: "Show empty state" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Your next project starts here" }),
-  ).toBeVisible();
-  await page.getByRole("link", { name: "All projects", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "A fresh start for your workspace" }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Show sample data" }).click();
-  await expect(
-    page.getByRole("link", { name: "Brand & website refresh", exact: true }),
-  ).toBeVisible();
-});
-
-test("wallet dialog explains connection and preserves accessible dismissal", async ({
-  page,
-}) => {
-  await page.goto("/dashboard");
-  const wallet = page
-    .getByRole("button", {
-      name: "Connect wallet",
-      exact: true,
-    })
-    .first();
-  await wallet.click();
-  const dialog = page.getByRole("dialog", {
-    name: "Wallet connection",
-    exact: true,
-  });
-  await expect(dialog).toBeVisible();
-  await expect(
-    dialog.getByText(/Connection does not sign a message/),
-  ).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(dialog).not.toBeVisible();
-  await expect(wallet).toBeFocused();
-  expect(await page.evaluate(() => document.body.style.overflow)).toBe("");
+  await noOverflow(page);
 });
 
 test("draft validation and review never create a project or payment", async ({
   page,
 }) => {
-  await page.goto("/projects/new");
+  await installWallet(page);
+  await installRpc(page);
+  await installAuth(page);
+  await signIn(page, "/projects/new");
   await page.getByRole("button", { name: "Review draft" }).click();
   await expect(
     page.getByRole("alert", { name: "Draft validation" }),
@@ -129,7 +324,7 @@ test("draft validation and review never create a project or payment", async ({
     .fill("An interface test, no private data.");
   await page
     .getByLabel("Freelancer wallet address")
-    .fill(`0x${"1".repeat(40)}`);
+    .fill(`0x${"3".repeat(40)}`);
   await page
     .getByLabel("Deliverable", { exact: true })
     .fill("A clear deliverable");
@@ -151,14 +346,19 @@ test("draft validation and review never create a project or payment", async ({
   await expect(
     dialog.getByText("10.123456 mUSD", { exact: true }),
   ).toBeVisible();
-  await expect(
-    dialog.getByRole("button", { name: "Create project · not enabled" }),
-  ).toBeDisabled();
   await expect(dialog.getByText("Local draft · not created")).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      window.__testWallet.calls.includes("eth_sendTransaction"),
+    ),
+  ).toBe(false);
 });
 
 test("milestone form enforces the one-to-five range", async ({ page }) => {
-  await page.goto("/projects/new");
+  await installWallet(page);
+  await installRpc(page);
+  await installAuth(page);
+  await signIn(page, "/projects/new");
   for (let i = 0; i < 4; i++)
     await page
       .getByRole("button", { name: "Add milestone", exact: true })
@@ -171,21 +371,18 @@ test("milestone form enforces the one-to-five range", async ({ page }) => {
   await expect(page.getByLabel("Deliverable", { exact: true })).toHaveCount(4);
 });
 
-test("session preferences update the header and token precision", async ({
+test("profile name and token precision preferences apply across pages", async ({
   page,
-}) => {
-  await page.goto("/settings");
+}, testInfo) => {
+  await installWallet(page);
+  await installRpc(page, { decimals: 6 });
+  await installAuth(page);
+  await signIn(page, "/settings");
   await page.getByLabel("Display name").fill("Taylor Quinn");
-  await page.getByRole("button", { name: "Save preferences" }).click();
-  await expect(page.getByRole("status")).toContainText(
-    "Display name updated for this preview session.",
-  );
-  await expect(page.getByRole("link", { name: "Profile settings" })).toHaveText(
-    "TQ",
-  );
+  await page.getByRole("button", { name: "Save profile" }).click();
+  await expect(page.getByText("Profile saved.")).toBeVisible();
   await page.getByLabel("Full token precision").check();
-  // Keep the root provider mounted during navigation.
-  if (await page.getByRole("button", { name: "Open navigation" }).isVisible())
+  if (testInfo.project.name !== "desktop")
     await page.getByRole("button", { name: "Open navigation" }).click();
   await page
     .getByRole("navigation", { name: "Workspace navigation" })
@@ -195,69 +392,68 @@ test("session preferences update the header and token precision", async ({
   await expect(
     page.getByRole("heading", { name: "Welcome back, Taylor" }),
   ).toBeVisible();
-  await expect(page.getByText("5,350.000000", { exact: false })).toBeVisible();
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () => document.documentElement.scrollWidth <= window.innerWidth,
-      ),
-    )
-    .toBe(true);
-});
-
-test("dispute views show boundaries and no invented results", async ({
-  page,
-}) => {
-  await page.goto("/disputes/dp-2001");
-  await expect(
-    page.getByRole("main").getByText("Not finalized", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("main").getByText(/strictly after the voting deadline/),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Cast vote · not enabled" }),
-  ).toBeDisabled();
-  await page.getByRole("button", { name: "About private evidence" }).click();
-  await expect(
-    page.getByRole("dialog", { name: "Private evidence" }),
-  ).toContainText("does not upload or retrieve files");
-});
-
-test("transaction history does not fabricate confirmations or hashes", async ({
-  page,
-}) => {
-  await page.goto("/transactions");
-  await expect(
-    page.getByRole("heading", { name: "Your transaction history starts here" }),
-  ).toBeVisible();
-  await expect(page.locator("table")).toHaveCount(0);
-  await expect(page.getByText(/0x[\da-f]{40,}/i)).toHaveCount(0);
+  await expect(page.getByTestId("live-balance")).toContainText(/\.\d{6}/);
 });
 
 test("unknown project displays a useful not-found page", async ({ page }) => {
+  await installWallet(page, { persistAuthorization: true });
+  await installRpc(page);
+  await installAuth(page);
+  await signIn(page, "/dashboard");
   await page.goto("/projects/missing");
   await expect(
-    page.getByRole("heading", { name: "That page is out of scope." }),
+    page.getByRole("heading", { name: "Page not found" }),
   ).toBeVisible();
   await expect(
     page.getByRole("link", { name: "Back to overview" }),
   ).toHaveAttribute("href", "/dashboard");
 });
 
-test("capture landing and workspace for visual review", async ({
+test("capture sign-in and workspace for visual review", async ({
   page,
 }, testInfo) => {
-  for (const [name, route] of [
-    ["landing", "/"],
-    ["dashboard", "/dashboard"],
-    ["project-form", "/projects/new"],
-    ["dispute", "/disputes/dp-2001"],
-  ]) {
+  const state = escrowRpc();
+  await installWallet(page, { forwardRpc: true, persistAuthorization: true });
+  await state.install(page);
+  await installAuth(page);
+  await page.goto("/sign-in");
+  await page.screenshot({
+    path: testInfo.outputPath("sign-in.png"),
+    fullPage: true,
+  });
+  await page
+    .getByRole("button", { name: "Connect wallet", exact: true })
+    .click();
+  await page.screenshot({
+    path: testInfo.outputPath("sign-in-connected.png"),
+    fullPage: true,
+  });
+  await completeSignIn(page, "/dashboard");
+  for (const [name, route, ready] of [
+    ["dashboard", "/dashboard", "Needs your attention"],
+    ["projects", "/projects", "Projects"],
+    ["project", "/projects/0", "Milestones"],
+    ["project-form", "/projects/new", "New project"],
+    ["disputes", "/disputes", "Disputes"],
+    ["jury", "/juror", "Jury"],
+    ["transactions", "/transactions", "Transactions"],
+    ["settings", "/settings", "Settings"],
+  ] as const) {
     await page.goto(route);
+    await expect(
+      page.getByRole("heading", { name: ready, exact: true }).first(),
+    ).toBeVisible();
+    await page.waitForTimeout(400);
     await page.screenshot({
       path: testInfo.outputPath(`${name}.png`),
       fullPage: true,
     });
   }
+  await switchAccount(page, accountB);
+  await page.goto("/projects/0");
+  await expect(page.getByRole("heading", { name: "Milestones" })).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("project-freelancer.png"),
+    fullPage: true,
+  });
 });

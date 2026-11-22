@@ -3,12 +3,7 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { createSiweMessage } from "viem/siwe";
 import { verifyMessage } from "viem";
 import { randomBytes } from "node:crypto";
-import {
-  accountB,
-  connectWallet,
-  installRpc,
-  installWallet,
-} from "./wallet-fixture";
+import { accountB, installRpc, installWallet } from "./wallet-fixture";
 
 // Browser UI tests use an isolated API fixture. Real SIWE/cookie/SQL behavior is
 // covered by backend.test.ts; no test backend is enabled in the production app.
@@ -66,9 +61,17 @@ async function setup(page: Page, rejected = false, deferSigning = false) {
         expiresAt: new Date(Date.now() + 3600_000).toISOString(),
       };
       result = { session };
+      await page.context().addCookies([
+        {
+          name: "tl_session",
+          value: "b".repeat(64),
+          url: new URL(request.url()).origin,
+        },
+      ]);
     } else if (path.endsWith("/auth/logout")) {
       session = null;
       ++logouts;
+      await page.context().clearCookies({ name: "tl_session" });
       result = { loggedOut: true };
     } else if (path === "/api/profile") {
       if (!session) {
@@ -87,12 +90,23 @@ async function setup(page: Page, rejected = false, deferSigning = false) {
         };
       }
       result = { profile };
+    } else if (path.startsWith("/api/projects/") || path === "/api/files") {
+      await route.fulfill({
+        status: 404,
+        json: { error: { message: "Not found" } },
+      });
+      return;
     } else throw new Error(`Unexpected API fixture ${path}`);
     await route.fulfill({ json: result });
   });
   await page.goto("/settings");
-  await connectWallet(page);
-  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fsettings/);
+  await page
+    .getByRole("button", { name: "Connect wallet", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Sign in with Ethereum", exact: true }),
+  ).toBeVisible();
   return {
     expire: () => {
       session = null;
@@ -102,15 +116,16 @@ async function setup(page: Page, rejected = false, deferSigning = false) {
     verifications: () => verifications,
   };
 }
+const signedIn = (page: Page) =>
+  expect(page.getByLabel("Display name")).toBeVisible();
+const signedOut = async (page: Page) => {
+  await expect(page).toHaveURL(/\/sign-in/);
+  await expect(page.getByLabel("Display name")).toHaveCount(0);
+};
 test("wallet connection remains separate from backend sign-in and profile editing", async ({
   page,
 }) => {
   await setup(page);
-  await expect(
-    page
-      .getByRole("main")
-      .getByText("Backend not authenticated", { exact: true }),
-  ).toBeVisible();
   expect(
     await page.evaluate(() =>
       window.__testWallet.calls.includes("personal_sign"),
@@ -119,39 +134,33 @@ test("wallet connection remains separate from backend sign-in and profile editin
   await page
     .getByRole("button", { name: "Sign in with Ethereum", exact: true })
     .click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await signedIn(page);
+  await page.getByLabel("Display name").fill("Taylor");
+  await page.getByLabel("About you (optional)").fill("Protocol developer");
+  await page.getByRole("button", { name: "Save profile" }).click();
+  await expect(page.getByText("Profile saved.", { exact: true })).toBeVisible();
+  await page
+    .getByRole("main")
+    .getByRole("button", { name: "Sign out", exact: true })
+    .click();
+  await signedOut(page);
   await expect(
-    page.getByRole("main").getByText("Backend authenticated", { exact: true }),
-  ).toBeVisible();
-  await page.getByLabel("Backend display name").fill("Taylor");
-  await page.getByLabel("Biography (optional)").fill("Protocol developer");
-  await page.getByRole("button", { name: "Save backend profile" }).click();
-  await expect(
-    page.getByText("Backend profile saved.", { exact: true }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Sign out of backend" }).click();
-  await expect(
-    page
-      .getByRole("main")
-      .getByText("Backend not authenticated", { exact: true }),
-  ).toBeVisible();
-  await expect(page.getByLabel("Backend display name")).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "Manage wallet", exact: true }).first(),
+    page.getByRole("button", { name: "Sign in with Ethereum", exact: true }),
   ).toBeVisible();
 });
 test("wallet rejection remains visible without creating backend authentication", async ({
   page,
 }) => {
-  await setup(page, true);
+  const fixture = await setup(page, true);
   await page
     .getByRole("button", { name: "Sign in with Ethereum", exact: true })
     .click();
   await expect(
     page.getByRole("alert", { name: "Backend authentication error" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("main").getByText("Backend authenticated", { exact: true }),
-  ).toHaveCount(0);
+  await signedOut(page);
+  expect(fixture.verifications()).toBe(0);
 });
 test("switching wallets revokes backend authentication and hides the previous profile", async ({
   page,
@@ -160,17 +169,13 @@ test("switching wallets revokes backend authentication and hides the previous pr
   await page
     .getByRole("button", { name: "Sign in with Ethereum", exact: true })
     .click();
-  await expect(page.getByLabel("Backend display name")).toBeVisible();
+  await signedIn(page);
   await page.evaluate(
     (address) => window.__testWallet.account(address),
     accountB,
   );
-  await expect(
-    page
-      .getByRole("main")
-      .getByText("Backend not authenticated", { exact: true }),
-  ).toBeVisible();
-  await expect(page.getByLabel("Backend display name")).toHaveCount(0);
+  await expect(page).toHaveURL(/ended=1/);
+  await signedOut(page);
   await expect.poll(fixture.logouts).toBeGreaterThan(0);
 });
 test("expired backend session is removed on focus refresh", async ({
@@ -180,17 +185,10 @@ test("expired backend session is removed on focus refresh", async ({
   await page
     .getByRole("button", { name: "Sign in with Ethereum", exact: true })
     .click();
-  await expect(
-    page.getByRole("main").getByText("Backend authenticated", { exact: true }),
-  ).toBeVisible();
+  await signedIn(page);
   fixture.expire();
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect(
-    page
-      .getByRole("main")
-      .getByText("Backend not authenticated", { exact: true }),
-  ).toBeVisible();
-  await expect(page.getByLabel("Backend display name")).toHaveCount(0);
+  await signedOut(page);
 });
 test("profile validation blocks an empty persistent display name", async ({
   page,
@@ -199,12 +197,12 @@ test("profile validation blocks an empty persistent display name", async ({
   await page
     .getByRole("button", { name: "Sign in with Ethereum", exact: true })
     .click();
-  await expect(page.getByLabel("Backend display name")).toBeVisible();
-  await page.getByLabel("Backend display name").fill("");
-  await page.getByRole("button", { name: "Save backend profile" }).click();
+  await signedIn(page);
+  await page.getByLabel("Display name").fill("");
+  await page.getByRole("button", { name: "Save profile" }).click();
   expect(
     await page
-      .getByLabel("Backend display name")
+      .getByLabel("Display name")
       .evaluate((element: HTMLInputElement) => element.validity.valueMissing),
   ).toBe(true);
 });
@@ -215,7 +213,7 @@ test("wallet changes during a pending signature never verify the old account", a
   const main = page.getByRole("main");
   await main.getByRole("button", { name: "Sign in with Ethereum" }).click();
   await expect(
-    main.getByRole("button", { name: "Confirm sign-in in wallet…" }),
+    main.getByRole("button", { name: "Confirm in your wallet…" }),
   ).toBeDisabled();
   await expect
     .poll(async () =>
@@ -236,7 +234,7 @@ test("wallet changes during a pending signature never verify the old account", a
     main.getByRole("alert", { name: "Backend authentication error" }),
   ).toContainText("Wallet changed");
   expect(fixture.verifications()).toBe(0);
-  await expect(main.getByLabel("Backend display name")).toHaveCount(0);
+  await signedOut(page);
 });
 test("unsupported networks cannot request a backend signature", async ({
   page,
@@ -246,8 +244,13 @@ test("unsupported networks cannot request a backend signature", async ({
   await expect(
     page
       .getByRole("main")
+      .getByRole("button", { name: "Switch to Hardhat Local" }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole("main")
       .getByRole("button", { name: "Sign in with Ethereum" }),
-  ).toBeDisabled();
+  ).toHaveCount(0);
   expect(
     await page.evaluate(() =>
       window.__testWallet.calls.includes("personal_sign"),

@@ -1,6 +1,6 @@
 "use client";
 import { formatMUSD } from "@/lib/format";
-import { usePreview } from "./providers";
+import { useUi } from "./providers";
 export function Money({
   amount,
   unit = true,
@@ -8,7 +8,7 @@ export function Money({
   amount: bigint;
   unit?: boolean;
 }) {
-  const { precise } = usePreview();
+  const { precise } = useUi();
   return (
     <span className={`money ${precise ? "money-precise" : ""}`}>
       {formatMUSD(amount, precise)}

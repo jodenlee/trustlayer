@@ -6,7 +6,7 @@ import { useBackendAuth } from "./auth-provider";
 import { backendRequest } from "@/lib/auth-client";
 import { metadataScope } from "@/lib/metadata-client";
 import { FILE_TYPES, type FileCategory, type FileRecord } from "@/lib/files";
-import { Button, Field, Input } from "./ui";
+import { Button, Disclosure, Field, Hash, Input } from "./ui";
 import { useFileDraft } from "./file-draft-provider";
 
 export async function browserFileHash(bytes: ArrayBuffer) {
@@ -244,24 +244,32 @@ export function PrivateFiles({
   }
   if (!auth.session)
     return (
-      <p className="small text-muted mt-3">
+      <p className="small text-muted">
         Authentication required or expired. Sign in as a relevant participant or
         assigned juror to access private files.
       </p>
     );
+  const heading =
+    category === "deliverable"
+      ? "Delivered files"
+      : category === "opening"
+        ? "Evidence for the dispute"
+        : category === "response"
+          ? "Response evidence"
+          : "Case files";
   return (
-    <div className="space-y-3 mt-4" aria-label="Private files">
-      <h3>
-        Private {category === "deliverable" ? "deliverables" : "evidence"}
-      </h3>
-      <p className="small text-muted">
-        PDF, PNG, JPEG or UTF-8 text; private downloads are integrity checked.
-        Maximum{" "}
-        {Math.round((files.data?.maxBytes ?? 10 * 1024 * 1024) / 1024 / 1024)}{" "}
-        MiB. Hashes are public references, not encryption.
-      </p>
+    <div className="files" aria-label="Private files">
+      <div>
+        <h3 className="small">{heading}</h3>
+        <p className="field-hint">
+          Private to the parties{disputeId !== undefined ? " and jurors" : ""}.
+          PDF, PNG, JPEG or text, up to{" "}
+          {Math.round((files.data?.maxBytes ?? 10 * 1024 * 1024) / 1024 / 1024)}{" "}
+          MiB. Downloads are checked against their SHA-256 fingerprint.
+        </p>
+      </div>
       {canUpload && (
-        <>
+        <div className="stack-sm">
           <Field
             id={`private-file-${category}-${index}`}
             label={`Select ${category} file`}
@@ -278,20 +286,23 @@ export function PrivateFiles({
             />
           </Field>
           {selection && (
-            <p className="small">
+            <p className="small text-muted">
               File selected: {selection.name} · {selection.size} bytes ·{" "}
               {selection.type || "text/plain"}
             </p>
           )}
-          <Button
-            variant="secondary"
-            disabled={!selection || progress !== undefined}
-            onClick={() => void upload()}
-          >
-            {progress === undefined
-              ? "Upload privately"
-              : `Uploading ${progress}%`}
-          </Button>
+          <div className="button-row">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!selection || progress !== undefined}
+              onClick={() => void upload()}
+            >
+              {progress === undefined
+                ? "Upload privately"
+                : `Uploading ${progress}%`}
+            </Button>
+          </div>
           {progress !== undefined && (
             <progress
               aria-label="Private upload progress"
@@ -299,39 +310,57 @@ export function PrivateFiles({
               value={progress}
             />
           )}
-        </>
+        </div>
       )}
       {files.error && (
-        <div>
+        <div className="stack-sm">
           <p role="alert" className="form-error">
             File listing unavailable. {files.error.message}
           </p>
-          <Button variant="ghost" onClick={() => void files.refetch()}>
-            Retry file listing
-          </Button>
+          <div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void files.refetch()}
+            >
+              Retry file listing
+            </Button>
+          </div>
         </div>
       )}
-      {files.isPending && <p className="small">Loading private files…</p>}
+      {files.isPending && (
+        <p className="small text-muted">Loading private files…</p>
+      )}
       {files.isSuccess && !files.isFetching && visibleFiles?.length === 0 && (
         <p className="small text-muted">No accessible files are recorded.</p>
       )}
       {visibleFiles?.map((file) => (
-        <div key={file.id} className="border-t border-slate-200 pt-3 space-y-2">
-          <p>
-            {file.filename} · {file.byte_size} bytes · {file.status}
-          </p>
+        <div key={file.id} className="file-row">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <span className="file-name">{file.filename}</span>
+            <span className="small text-faint">
+              {(file.byte_size / 1024).toFixed(1)} KB · {file.status}
+            </span>
+          </div>
           <p className="small text-muted">
-            {file.created_at} ·{" "}
             {file.category === "evidence"
               ? "Off-chain case attachment"
               : file.transaction_hash
                 ? "Confirmed on-chain reference"
                 : "Awaiting blockchain reference/association"}
+            {" · "}
+            {file.created_at}
           </p>
-          <code className="wallet-address">{file.content_hash}</code>
-          <div className="flex flex-wrap gap-2">
+          <p className="small text-muted">
+            SHA-256 <Hash value={file.content_hash} />
+          </p>
+          <div className="button-row">
             {["ready", "linked"].includes(file.status) && (
-              <Button variant="ghost" onClick={() => void download(file)}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void download(file)}
+              >
                 Download & verify
               </Button>
             )}
@@ -339,7 +368,11 @@ export function PrivateFiles({
               file.status === "ready" &&
               file.category === category &&
               onSelected && (
-                <Button variant="ghost" onClick={() => onSelected(file)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onSelected(file)}
+                >
                   Use this hash
                 </Button>
               )}
@@ -347,6 +380,7 @@ export function PrivateFiles({
               file.status === "failed" && (
                 <Button
                   variant="ghost"
+                  size="sm"
                   onClick={async () => {
                     try {
                       await backendRequest(
@@ -370,25 +404,32 @@ export function PrivateFiles({
           {file.uploader === auth.session!.address &&
             file.status !== "linked" &&
             file.category !== "evidence" && (
-              <div>
-                <Field
-                  id={`receipt-${file.id}`}
-                  label="Confirmed transaction hash for association"
-                >
-                  <Input
+              <Disclosure plain summary="Link to a confirmed transaction">
+                <div className="stack-sm">
+                  <Field
                     id={`receipt-${file.id}`}
-                    value={receipt}
-                    onChange={(e) => setReceipt(e.target.value.trim())}
-                  />
-                </Field>
-                <Button
-                  variant="secondary"
-                  disabled={!/^0x[0-9a-fA-F]{64}$/.test(receipt)}
-                  onClick={() => void link(file)}
-                >
-                  Retry confirmed association
-                </Button>
-              </div>
+                    label="Confirmed transaction hash for association"
+                    hint="Only needed if linking failed after a confirmed submission. This never sends a new transaction."
+                  >
+                    <Input
+                      id={`receipt-${file.id}`}
+                      spellCheck={false}
+                      value={receipt}
+                      onChange={(e) => setReceipt(e.target.value.trim())}
+                    />
+                  </Field>
+                  <div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={!/^0x[0-9a-fA-F]{64}$/.test(receipt)}
+                      onClick={() => void link(file)}
+                    >
+                      Retry confirmed association
+                    </Button>
+                  </div>
+                </div>
+              </Disclosure>
             )}
         </div>
       ))}

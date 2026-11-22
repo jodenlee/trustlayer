@@ -1,14 +1,9 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import {
-  BriefcaseBusiness,
-  FileCheck2,
-  LockKeyhole,
-  Plus,
-  Search,
-} from "lucide-react";
+import { Plus, RefreshCw, Search } from "lucide-react";
 import { useWalletProjects } from "@/lib/blockchain/hooks/use-projects";
+import { useVerifiedDeployment } from "@/lib/blockchain/hooks/use-protocol";
 import {
   PROJECT_STATES,
   projectActions,
@@ -16,39 +11,62 @@ import {
   type ChainProject,
 } from "@/lib/blockchain/projects";
 import { deploymentScope } from "@/lib/blockchain/session";
+import { describeError } from "@/lib/blockchain/errors";
 import { useWorkflowSession } from "./workflow-provider";
 import {
   Button,
   ButtonLink,
   Card,
-  CardHeading,
+  CardFooter,
   DataTable,
   EmptyState,
   Input,
+  LoadingRow,
   MilestoneProgress,
   PageHeading,
   StatusBadge,
 } from "./ui";
 import { Money } from "./money";
-import { StatCard } from "./stats";
-import { LiveWalletCard } from "./live-wallet";
-import { describeError } from "@/lib/blockchain/errors";
-import { SessionHistory } from "./chain-history";
-import { ChainDisputes } from "./chain-disputes";
 import { useProjectTitles } from "./project-metadata";
 
+/**
+ * Display names for projects: saved metadata when signed in, otherwise this
+ * session's creation draft, otherwise "Project #id". Never fabricated.
+ */
+export function useProjectNames(projects: ChainProject[]) {
+  const deployment = useVerifiedDeployment();
+  const session = useWorkflowSession();
+  const manifest = deployment.readable ? deployment.data?.manifest : undefined;
+  const scope = deployment.data
+    ? deploymentScope(deployment.data.manifest)
+    : "";
+  const titles = useProjectTitles(
+    manifest,
+    projects.map((p) => p.id),
+  );
+  return new Map(
+    projects.map((p) => [
+      String(p.id),
+      titles.get(String(p.id)) ??
+        session.metadata(scope, p.id, p.metadataHash)?.title ??
+        `Project #${p.id}`,
+    ]),
+  );
+}
+const roleLabel = {
+  Client: "You’re the client",
+  Freelancer: "You’re the freelancer",
+  Viewer: "Viewer",
+};
 export function ChainProjectTable({
   projects,
-  scope,
+  names,
   account,
-  titles,
 }: {
   projects: ChainProject[];
-  scope: string;
+  names: Map<string, string>;
   account: `0x${string}`;
-  titles?: Map<string, string | undefined>;
 }) {
-  const session = useWorkflowSession();
   return (
     <DataTable
       caption="On-chain wallet projects"
@@ -59,13 +77,11 @@ export function ChainProjectTable({
           title: "Project",
           render: (p) => (
             <div>
-              <Link className="project-name" href={`/projects/${p.id}`}>
-                {titles?.get(String(p.id)) ??
-                  session.metadata(scope, p.id, p.metadataHash)?.title ??
-                  `Project #${p.id}`}
+              <Link className="row-title" href={`/projects/${p.id}`}>
+                {names.get(String(p.id)) ?? `Project #${p.id}`}
               </Link>
-              <p className="project-subtitle">
-                #{p.id.toString()} · {projectRole(p, account)} · On-chain
+              <p className="row-subtitle">
+                #{p.id.toString()} · {roleLabel[projectRole(p, account)]}
               </p>
             </div>
           ),
@@ -94,120 +110,62 @@ export function ChainProjectTable({
     />
   );
 }
-export function ChainProjects({ dashboard = false }: { dashboard?: boolean }) {
+const FILTERS = [
+  "All projects",
+  "Needs action",
+  "Unfunded",
+  "Awaiting acceptance",
+  "Active",
+  "Completed",
+  "Closed",
+] as const;
+export function ChainProjects() {
   const data = useWalletProjects();
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState("All projects");
-  const session = useWorkflowSession();
+  const [filter, setFilter] =
+    useState<(typeof FILTERS)[number]>("All projects");
   const { deployment } = data;
-  const scope = deployment.data
-    ? deploymentScope(deployment.data.manifest)
-    : "";
   const items = data.projects;
-  const titles = useProjectTitles(
-    deployment.readable ? deployment.data?.manifest : undefined,
-    items.map((p) => p.id),
-  );
+  const names = useProjectNames(items);
+  const now = data.data?.pages[0]?.now ?? 0n;
+  const needsAction = (p: ChainProject) => {
+    if (!deployment.address) return false;
+    const a = projectActions(p, deployment.address, now);
+    return a.fund || a.accept || a.submit || a.approve || a.release;
+  };
   const rows = items.filter(
     (p) =>
-      (filter === "All projects" || PROJECT_STATES[p.state] === filter) &&
-      `${p.id} ${titles.get(String(p.id)) ?? session.metadata(scope, p.id, p.metadataHash)?.title ?? ""} ${p.client} ${p.freelancer}`
+      (filter === "All projects" ||
+        (filter === "Needs action"
+          ? needsAction(p)
+          : PROJECT_STATES[p.state] === filter)) &&
+      `${p.id} ${names.get(String(p.id)) ?? ""} ${p.client} ${p.freelancer}`
         .toLowerCase()
-        .includes(search.toLowerCase()),
+        .includes(search.trim().toLowerCase()),
   );
-  const now = data.data?.pages[0]?.now ?? 0n;
-  const loaded = deployment.readable && data.isSuccess;
-  const pending = items.filter(
-    (p) =>
-      deployment.address &&
-      (() => {
-        const actions = projectActions(p, deployment.address!, now);
-        return actions.submit || actions.approve || actions.release;
-      })(),
-  ).length;
   return (
     <>
       <PageHeading
-        title={dashboard ? "Your workspace" : "Projects"}
-        description="Your connected wallet’s on-chain agreements. Sign in to load saved descriptive metadata."
+        title="Projects"
+        description="Agreements where you are the client or the freelancer."
         action={
           <ButtonLink href="/projects/new">
-            <Plus size={16} />
+            <Plus size={16} aria-hidden="true" />
             New project
           </ButtonLink>
         }
       />
-      <div className="mb-6">
-        <LiveWalletCard />
-      </div>
-      {dashboard && (
-        <div className="stats-grid">
-          <StatCard
-            label="Active projects loaded"
-            icon={BriefcaseBusiness}
-            value={loaded ? items.filter((p) => p.state === 2).length : "—"}
-            note="From the loaded discovery pages"
-          />
-          <StatCard
-            label="Loaded project escrow"
-            icon={LockKeyhole}
-            value={
-              loaded ? (
-                <Money
-                  amount={items.reduce((n, p) => n + p.escrowRemaining, 0n)}
-                />
-              ) : (
-                "—"
-              )
-            }
-            note="Actual remaining escrow, both roles"
-          />
-          <StatCard
-            label="Pending milestone actions"
-            icon={FileCheck2}
-            value={loaded ? pending : "—"}
-            note="Role and chain-time based actions"
-          />
-          <StatCard
-            label="Projects loaded"
-            icon={BriefcaseBusiness}
-            value={loaded ? items.length : "—"}
-            note={
-              data.hasNextPage
-                ? "Earlier project IDs remain to scan"
-                : "Discovery complete for this snapshot"
-            }
-          />
-        </div>
-      )}
-      {dashboard && (
-        <div className="mt-6">
-          <ChainDisputes dashboard />
-          <SessionHistory confirmedOnly />
-        </div>
-      )}
-      <Card>
-        <CardHeading
-          title={dashboard ? "Your projects" : "On-chain projects"}
-          description="Twenty candidate IDs per page; only your client or freelancer projects are shown."
-        />
+      <Card label="Projects">
         <div className="toolbar">
           <div
-            className="tabs"
+            className="segmented"
             role="group"
             aria-label="Filter on-chain projects"
           >
-            {[
-              "All projects",
-              "Unfunded",
-              "Awaiting acceptance",
-              "Active",
-              "Completed",
-              "Closed",
-            ].map((s) => (
+            {FILTERS.map((s) => (
               <button
                 key={s}
-                className={`tab ${filter === s ? "active" : ""}`}
+                type="button"
                 aria-pressed={filter === s}
                 onClick={() => setFilter(s)}
               >
@@ -216,10 +174,10 @@ export function ChainProjects({ dashboard = false }: { dashboard?: boolean }) {
             ))}
           </div>
           <div className="search-field">
-            <Search size={16} />
+            <Search size={15} aria-hidden="true" />
             <Input
               aria-label="Search on-chain projects"
-              placeholder="Project ID or wallet…"
+              placeholder="Search by name, ID or address"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -227,12 +185,12 @@ export function ChainProjects({ dashboard = false }: { dashboard?: boolean }) {
         </div>
         {!deployment.readable ? (
           <EmptyState
-            title="Verify your local connection"
-            description="On-chain project reads are paused until your wallet and deployment are verified. Sample projects are not used as account data."
+            title="Waiting for the local network"
+            description="Projects load once your wallet and the contracts are verified."
           />
         ) : data.isError ? (
           <EmptyState
-            title="Project discovery failed"
+            title="Couldn’t load your projects"
             description={describeError(data.error).message}
             action={
               <Button variant="secondary" onClick={() => void data.refetch()}>
@@ -241,65 +199,68 @@ export function ChainProjects({ dashboard = false }: { dashboard?: boolean }) {
             }
           />
         ) : data.isPending ? (
-          <div role="status" className="empty-state">
-            Loading on-chain projects…
-          </div>
+          <LoadingRow label="Loading on-chain projects…" />
         ) : rows.length ? (
           <ChainProjectTable
-            titles={titles}
+            names={names}
             projects={rows}
-            scope={scope}
             account={deployment.address!}
           />
         ) : (
           <EmptyState
             title={
               items.length
-                ? "No matching on-chain projects"
+                ? "No matching projects"
                 : data.hasNextPage
-                  ? "No matches in the scanned IDs"
+                  ? "No projects in the most recent IDs"
                   : "No on-chain projects yet"
             }
             description={
-              data.hasNextPage
-                ? "Continue scanning earlier project IDs. No unrestricted log scan is performed."
-                : "Create an agreement or ask the client to designate this wallet as the freelancer."
+              items.length
+                ? "Try another filter or search term."
+                : data.hasNextPage
+                  ? "Load earlier projects to keep looking."
+                  : "Create a project, or share your wallet address with a client so they can name you as the freelancer."
+            }
+            action={
+              !items.length && !data.hasNextPage ? (
+                <ButtonLink href="/projects/new" variant="secondary">
+                  Create a project
+                </ButtonLink>
+              ) : undefined
             }
           />
         )}
-        <div className="card-body card-divider flex flex-wrap items-center gap-4">
-          <span className="small text-muted">
-            {data.scanned.toString()} candidate IDs scanned · {items.length}{" "}
-            matching projects
-          </span>
-          {data.hasNextPage && (
-            <Button
-              variant="secondary"
-              disabled={data.isFetching || !deployment.ready}
-              onClick={() => void data.fetchNextPage()}
-            >
-              Load earlier projects
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            disabled={data.isFetching || !deployment.ready}
-            onClick={() => void data.refetch()}
-          >
-            Refresh projects
-          </Button>
-        </div>
+        {deployment.readable && (
+          <CardFooter>
+            <span>
+              {items.length} {items.length === 1 ? "project" : "projects"}
+              {data.hasNextPage ? " in the most recent IDs" : ""}
+            </span>
+            <span className="ml-auto button-row">
+              {data.hasNextPage && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={data.isFetching || !deployment.ready}
+                  onClick={() => void data.fetchNextPage()}
+                >
+                  Load earlier projects
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={data.isFetching || !deployment.ready}
+                onClick={() => void data.refetch()}
+              >
+                <RefreshCw size={13} aria-hidden="true" />
+                Refresh projects
+              </Button>
+            </span>
+          </CardFooter>
+        )}
       </Card>
-      {dashboard && (
-        <div className="info-note mt-5">
-          Counts and escrow totals cover loaded discovery pages. Confirmed
-          activity is available in{" "}
-          <Link className="text-link" href="/transactions">
-            Transactions
-          </Link>
-          .
-        </div>
-      )}
     </>
   );
 }

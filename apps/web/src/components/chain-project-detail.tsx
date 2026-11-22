@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowLeft, LockKeyhole } from "lucide-react";
+import { ArrowLeft, Check, LockKeyhole, RefreshCw } from "lucide-react";
 import { useChainProject } from "@/lib/blockchain/hooks/use-projects";
 import { useProtocolTransaction } from "@/lib/blockchain/hooks/use-protocol-transaction";
 import {
@@ -10,30 +10,37 @@ import {
 } from "@/lib/blockchain/escrow-actions";
 import {
   PROJECT_STATES,
-  MILESTONE_STATES,
   chainDate,
   normalAllocation,
   projectActions,
   projectRole,
   validEvidenceHash,
+  type ChainMilestone,
+  type ChainProject,
 } from "@/lib/blockchain/projects";
 import { deploymentScope } from "@/lib/blockchain/session";
 import { describeError } from "@/lib/blockchain/errors";
+import { timeUntil } from "@/lib/format";
 import { useWorkflowSession } from "./workflow-provider";
-import { usePreview } from "./providers";
+import { useUi } from "./providers";
 import {
   Button,
   Card,
+  CardBody,
   CardHeading,
+  Disclosure,
   EmptyState,
   Field,
+  Hash,
   Input,
+  KeyValue,
+  LoadingRow,
+  Notice,
   PageHeading,
   StatusBadge,
 } from "./ui";
 import { Dialog } from "./dialog";
 import { Money } from "./money";
-import { LiveWalletCard } from "./live-wallet";
 import { TransactionFeedback } from "./transaction-feedback";
 import { ChainHistory } from "./chain-history";
 import { ProjectArbitration } from "./project-arbitration";
@@ -46,18 +53,66 @@ import { backendRequest } from "@/lib/auth-client";
 import type { FileRecord } from "@/lib/files";
 
 const labels: Record<EscrowAction, string> = {
-  approveToken: "Approve exact mUSD allowance",
+  approveToken: "Approve mUSD for escrow",
   fund: "Fund escrow",
   accept: "Accept project",
   submit: "Submit milestone",
   approve: "Approve & pay milestone",
-  release: "Release after review timeout",
+  release: "Release payment after review period",
 };
+const roleText = {
+  Client: "You’re the client",
+  Freelancer: "You’re the freelancer",
+  Viewer: "Viewing only",
+};
+function milestoneStatus(
+  project: ChainProject,
+  m: ChainMilestone,
+  index: number,
+) {
+  if (m.state === 3) return "Settled";
+  if (m.state === 2) return "Disputed";
+  if (m.state === 1) return "In review";
+  return index === project.currentMilestone && project.state === 2
+    ? "Active"
+    : "Pending";
+}
+function PayoutBreakdown({
+  amount,
+  feeBps,
+}: {
+  amount: bigint;
+  feeBps: number;
+}) {
+  const allocation = normalAllocation(amount, feeBps);
+  return (
+    <dl className="breakdown" aria-label="Payout if approved">
+      <div>
+        <dt>Milestone amount</dt>
+        <dd>
+          <Money amount={allocation.gross} />
+        </dd>
+      </div>
+      <div>
+        <dt>Service fee ({feeBps / 100}%)</dt>
+        <dd>
+          <Money amount={allocation.serviceFee} />
+        </dd>
+      </div>
+      <div>
+        <dt>Freelancer receives</dt>
+        <dd>
+          <Money amount={allocation.freelancerNet} />
+        </dd>
+      </div>
+    </dl>
+  );
+}
 export function ChainProjectDetail({ id }: { id: bigint }) {
   const read = useChainProject(id);
   const tx = useProtocolTransaction();
   const session = useWorkflowSession();
-  const { toast } = usePreview();
+  const { toast } = useUi();
   const [action, setAction] = useState<EscrowAction>();
   const [reviewContext, setReviewContext] = useState<{
     scope: string;
@@ -197,325 +252,437 @@ export function ChainProjectDetail({ id }: { id: bigint }) {
       setError(e instanceof Error ? e.message : describeError(e).message);
     }
   }
+  const role = project && account ? projectRole(project, account) : "Viewer";
+  const available =
+    project && account && view
+      ? projectActions(project, account, view.now)
+      : undefined;
+  const current = project?.milestones[project.currentMilestone];
+  const disabled = busy || read.isFetching;
+
+  function nextStep() {
+    if (!project || !view || !available) return null;
+    const expired = project.state < 2 && view.now > project.acceptBy;
+    if (expired)
+      return (
+        <div className="next-step warning">
+          <span className="eyebrow-label">ACCEPTANCE WINDOW CLOSED</span>
+          <h2>This project can no longer be funded or accepted</h2>
+          <p>
+            The acceptance deadline ({chainDate(project.acceptBy)}) has passed.
+            Any funded budget remains recorded in escrow; refund handling is not
+            available in this interface yet.
+          </p>
+        </div>
+      );
+    if (available.fund)
+      return (
+        <div className="next-step" aria-label="Next step">
+          <span className="eyebrow-label">NEXT STEP</span>
+          <h2>Fund the escrow</h2>
+          <p>
+            Deposit the full budget of <Money amount={project.total} />. The
+            freelancer can accept once it’s funded, and each milestone is paid
+            out only when you approve it. Fund by {chainDate(project.acceptBy)}.
+          </p>
+          <KeyValue
+            items={[
+              { label: "Your balance", value: <Money amount={view.balance} /> },
+              {
+                label: "Approved for escrow",
+                value: <Money amount={view.allowance} />,
+              },
+            ]}
+          />
+          {view.balance < project.total && (
+            <p className="form-error" role="alert" aria-label="Funding balance">
+              Insufficient mUSD balance for the full budget. Top up this wallet
+              with development tokens first.
+            </p>
+          )}
+          <div className="button-row">
+            {view.allowance < project.total ? (
+              <Button
+                disabled={disabled || view.balance < project.total}
+                onClick={() => reviewAction("approveToken")}
+              >
+                1. Approve mUSD
+              </Button>
+            ) : (
+              <span className="chip">
+                <Check size={12} aria-hidden="true" /> mUSD approved
+              </span>
+            )}
+            <Button
+              variant={view.allowance < project.total ? "secondary" : "primary"}
+              disabled={
+                disabled ||
+                view.balance < project.total ||
+                view.allowance < project.total
+              }
+              onClick={() => reviewAction("fund")}
+            >
+              2. Fund escrow
+            </Button>
+          </div>
+          <p className="small text-muted">
+            Two separate wallet confirmations: approval lets the escrow contract
+            take exactly the budget; funding moves it.
+          </p>
+        </div>
+      );
+    if (available.accept)
+      return (
+        <div className="next-step" aria-label="Next step">
+          <span className="eyebrow-label">NEXT STEP</span>
+          <h2>Review and accept this project</h2>
+          <p>
+            The client has funded <Money amount={project.total} /> in escrow.
+            Accepting commits you to the milestones below. Accept by{" "}
+            {chainDate(project.acceptBy)} (
+            {timeUntil(project.acceptBy, view.now)}).
+          </p>
+          <div className="button-row">
+            <Button disabled={disabled} onClick={() => reviewAction("accept")}>
+              Accept project
+            </Button>
+          </div>
+        </div>
+      );
+    const waiting = (title: string, text: React.ReactNode) => (
+      <div className="next-step neutral" aria-label="Next step">
+        <span className="eyebrow-text">STATUS</span>
+        <h2>{title}</h2>
+        <p>{text}</p>
+      </div>
+    );
+    const n = project.currentMilestone + 1;
+    if (project.state === 0)
+      return waiting(
+        "Waiting for the client to fund escrow",
+        <>Funding must happen by {chainDate(project.acceptBy)}.</>,
+      );
+    if (project.state === 1)
+      return waiting(
+        "Waiting for the freelancer to accept",
+        <>
+          The budget is in escrow. Acceptance closes{" "}
+          {chainDate(project.acceptBy)}.
+        </>,
+      );
+    if (project.state === 3)
+      return waiting(
+        "All milestones are settled",
+        "This project is complete. Payouts are listed under Activity.",
+      );
+    if (project.state === 4)
+      return waiting(
+        "This project is closed",
+        "No further actions are possible.",
+      );
+    if (!current) return null;
+    if (current.state === 2)
+      return waiting(
+        `Milestone ${n} is in dispute`,
+        "Its funds are frozen until jurors decide. Follow the case from the milestone below.",
+      );
+    if (current.state === 1)
+      return role === "Client"
+        ? waiting(
+            `Review milestone ${n}`,
+            <>
+              Download and check the delivery, then approve payment by{" "}
+              {chainDate(current.reviewEnd)}. If there’s a problem you can open
+              a dispute instead.
+            </>,
+          )
+        : waiting(
+            `Milestone ${n} is with the client for review`,
+            <>
+              The review window ends {chainDate(current.reviewEnd)}. After that,
+              you can release the payment yourself.
+            </>,
+          );
+    return role === "Freelancer"
+      ? waiting(
+          `Deliver milestone ${n}`,
+          <>
+            Upload your work privately and submit it by{" "}
+            {chainDate(current.dueAt)} (a 48-hour grace period applies).
+          </>,
+        )
+      : waiting(
+          `Milestone ${n} is in progress`,
+          <>The freelancer’s delivery is due {chainDate(current.dueAt)}.</>,
+        );
+  }
+
   return (
     <>
       <Link href="/projects" className="back-link">
-        <ArrowLeft size={14} />
-        All projects
+        <ArrowLeft size={14} aria-hidden="true" />
+        Projects
       </Link>
       <PageHeading
+        eyebrow={
+          project && account ? (
+            <>
+              <StatusBadge status={PROJECT_STATES[project.state]} />
+              <span className="chip">{roleText[role]}</span>
+            </>
+          ) : undefined
+        }
         title={metadata?.title ?? `Project #${id}`}
-        eyebrow="ON-CHAIN AGREEMENT"
         description={
           metadata
-            ? `${metadata.description} · ${persistent.project ? "Saved project metadata." : "Descriptive metadata exists only in this browser session."}`
-            : "Titles and descriptions are not stored on-chain. Session metadata is unavailable for this project."
+            ? metadata.description
+            : project
+              ? "No saved description for this project."
+              : undefined
         }
       />
-      <TransactionFeedback state={tx.state} />
-      {error && (
-        <p role="alert" className="form-error my-4">
-          {error}
-        </p>
-      )}
-      {busy && (
-        <p className="info-note my-4">
-          A wallet request is pending or unconfirmed. Wait for its receipt, or
-          check{" "}
-          <Link className="text-link" href="/transactions">
-            Transactions
-          </Link>{" "}
-          before retrying.
-        </p>
-      )}
-      {!read.deployment.ready && <LiveWalletCard />}
-      {view && !read.deployment.ready && (
-        <p role="status" className="small text-muted">
-          Rechecking the deployment. Showing the last verified project;
-          transaction actions are paused.
-        </p>
-      )}
-      {read.deployment.ready && read.isError && (
-        <Card>
-          <EmptyState
-            title="Project unavailable"
-            description={
-              read.error instanceof Error
-                ? read.error.message
-                : "Refresh the verified project data."
-            }
-            action={
-              <Button variant="secondary" onClick={() => void read.refetch()}>
-                Retry project
-              </Button>
-            }
-          />
-        </Card>
-      )}
-      {read.deployment.ready && !view && !read.isError && (
-        <div role="status" className="empty-state">
-          Loading project from escrow…
-        </div>
-      )}
-      {view && project && account && (
-        <>
-          {projectRole(project, account) !== "Viewer" && config && (
-            <ProjectMetadataEditor
-              key={`${deploymentScope(config.manifest)}:${account}:${persistent.project?.revision ?? "new"}`}
-              manifest={config.manifest}
-              id={id}
-              project={persistent.project}
-              fallback={localMetadata}
-              count={project.milestoneCount}
+      <div className="stack">
+        <TransactionFeedback state={tx.state} />
+        {error && (
+          <p role="alert" className="form-error">
+            {error}
+          </p>
+        )}
+        {busy && (
+          <Notice tone="info">
+            <p>
+              A wallet request is pending. Wait for its confirmation, or check{" "}
+              <Link className="text-link" href="/transactions">
+                Transactions
+              </Link>{" "}
+              before retrying.
+            </p>
+          </Notice>
+        )}
+        {view && !read.deployment.ready && (
+          <p role="status" className="small text-muted">
+            Rechecking the network. Showing the last verified project; actions
+            are paused.
+          </p>
+        )}
+        {read.deployment.ready && read.isError && (
+          <Card>
+            <EmptyState
+              title="Project unavailable"
+              description={
+                read.error instanceof Error
+                  ? read.error.message
+                  : "Refresh the verified project data."
+              }
+              action={
+                <Button variant="secondary" onClick={() => void read.refetch()}>
+                  Retry project
+                </Button>
+              }
             />
-          )}
-          <div className="detail-grid">
-            <div className="space-y-5">
-              <Card>
-                <CardHeading
-                  title="Agreement & funding"
-                  action={
-                    <StatusBadge status={PROJECT_STATES[project.state]} />
-                  }
-                />
-                <div className="card-body pt-0!">
-                  <dl className="summary-list">
-                    <div>
-                      <dt>Your role</dt>
-                      <dd>{projectRole(project, account)}</dd>
-                    </div>
-                    <div>
-                      <dt>Budget</dt>
-                      <dd>
-                        <Money amount={project.total} />
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Remaining escrow</dt>
-                      <dd>
-                        <Money amount={project.escrowRemaining} />
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Acceptance deadline</dt>
-                      <dd>{chainDate(project.acceptBy)}</dd>
-                    </div>
-                    <div>
-                      <dt>Latest read chain time</dt>
-                      <dd>{chainDate(view.now)}</dd>
-                    </div>
-                  </dl>
-                  {projectActions(project, account, view.now).fund && (
-                    <div className="mt-5 space-y-3">
-                      <p className="small text-muted">
-                        Wallet balance <Money amount={view.balance} /> · Escrow
-                        allowance <Money amount={view.allowance} />
-                      </p>
-                      {view.balance < project.total && (
-                        <p
-                          className="form-error"
-                          role="alert"
-                          aria-label="Funding balance"
-                        >
-                          Insufficient mUSD balance for the full budget. Tokens
-                          must be provisioned outside this app.
-                        </p>
-                      )}
-                      {view.allowance < project.total ? (
-                        <Button
-                          disabled={
-                            busy ||
-                            read.isFetching ||
-                            view.balance < project.total
-                          }
-                          onClick={() => reviewAction("approveToken")}
-                        >
-                          1. Approve exact mUSD allowance
-                        </Button>
-                      ) : (
-                        <p className="small text-muted">
-                          Allowance is sufficient. Approval has not funded
-                          escrow.
-                        </p>
-                      )}
-                      <Button
-                        className="ml-2"
-                        disabled={
-                          busy ||
-                          read.isFetching ||
-                          view.balance < project.total ||
-                          view.allowance < project.total
-                        }
-                        onClick={() => reviewAction("fund")}
-                      >
-                        2. Fund escrow
-                      </Button>
-                      <p className="small text-muted">
-                        These are two separate transactions. Funding stays
-                        disabled until the confirmed allowance is read from the
-                        token.
-                      </p>
-                    </div>
-                  )}
-                  {projectActions(project, account, view.now).accept && (
-                    <Button
-                      className="mt-5"
-                      disabled={busy || read.isFetching}
-                      onClick={() => reviewAction("accept")}
-                    >
-                      Accept project
-                    </Button>
-                  )}
-                  {project.state < 2 && view.now > project.acceptBy && (
-                    <p className="small text-muted mt-4">
-                      The acceptance deadline has passed. Funding and acceptance
-                      are unavailable. Refund actions are not part of Phase 3C.
-                    </p>
-                  )}
-                </div>
-              </Card>
-              <Card>
+          </Card>
+        )}
+        {read.deployment.ready && !view && !read.isError && (
+          <LoadingRow label="Loading project from escrow…" />
+        )}
+        {view && project && account && available && (
+          <div className="grid-main">
+            <div className="stack">
+              {nextStep()}
+              <Card label="Milestones">
                 <CardHeading
                   title="Milestones"
-                  description="Contract order, amounts and deadlines. Indexes are zero-based on-chain."
+                  description="Delivered and paid in order. The client has 72 hours to review each submission."
                 />
-                <ol className="milestone-list">
+                <ol className="milestones mt-3">
                   {project.milestones.map((m, index) => {
-                    const available = projectActions(
-                      project,
-                      account,
-                      view.now,
+                    const isCurrent =
+                      index === project.currentMilestone && project.state === 2;
+                    const status = milestoneStatus(project, m, index);
+                    const name =
+                      metadata?.milestones[index] ?? `Milestone ${index + 1}`;
+                    const files = config && (
+                      <PrivateFiles
+                        key={`${deploymentScope(config.manifest)}:${account}:${index}`}
+                        manifest={config.manifest}
+                        projectId={id}
+                        index={index}
+                        category="deliverable"
+                        canUpload={isCurrent && available.submit}
+                        onSelected={(file) => {
+                          setEvidence(file.content_hash);
+                          setSelectedFile({
+                            file,
+                            scope: deploymentScope(config.manifest),
+                          });
+                        }}
+                      />
                     );
-                    const current = index === project.currentMilestone;
-                    const allocation = normalAllocation(
-                      m.amount,
-                      project.feeBps,
-                    );
+                    const hasEvidence =
+                      m.evidenceHash !== `0x${"0".repeat(64)}`;
                     return (
-                      <li className="milestone-row" key={index}>
-                        <span className="milestone-number">{index + 1}</span>
-                        <div className="milestone-content">
+                      <li
+                        className={`milestone ${isCurrent ? "current" : ""} ${m.state === 3 ? "settled" : ""}`}
+                        key={index}
+                        id={`milestone-${index + 1}`}
+                      >
+                        <span className="milestone-number" aria-hidden="true">
+                          {m.state === 3 ? <Check size={13} /> : index + 1}
+                        </span>
+                        <div className="min-w-0">
                           <div className="milestone-top">
-                            <h3>
-                              {metadata?.milestones[index] ??
-                                `Milestone ${index + 1}`}
-                            </h3>
+                            <h3>{name}</h3>
                             <Money amount={m.amount} />
                           </div>
                           <div className="milestone-meta">
-                            <StatusBadge status={MILESTONE_STATES[m.state]} />
+                            <StatusBadge status={status} />
                             <span>Due {chainDate(m.dueAt)}</span>
+                            {m.submittedAt > 0n && (
+                              <span>Submitted {chainDate(m.submittedAt)}</span>
+                            )}
+                            {m.state === 1 && (
+                              <span>
+                                Review deadline {chainDate(m.reviewEnd)}
+                              </span>
+                            )}
                           </div>
-                          {m.submittedAt > 0n && (
-                            <p className="small text-muted mt-3">
-                              Submitted {chainDate(m.submittedAt)} · Review
-                              deadline {chainDate(m.reviewEnd)}
-                            </p>
-                          )}
-                          {m.evidenceHash !== `0x${"0".repeat(64)}` && (
-                            <p className="wallet-address mt-3">
-                              Public evidence hash: {m.evidenceHash}
-                            </p>
-                          )}
-                          {config && (
-                            <PrivateFiles
-                              key={`${deploymentScope(config.manifest)}:${account}:${index}`}
-                              manifest={config.manifest}
-                              projectId={id}
-                              index={index}
-                              category="deliverable"
-                              canUpload={current && available.submit}
-                              onSelected={(file) => {
-                                setEvidence(file.content_hash);
-                                setSelectedFile({
-                                  file,
-                                  scope: deploymentScope(config.manifest),
-                                });
-                              }}
-                            />
-                          )}
-                          {m.state === 2 && (
-                            <p className="info-note mt-4">
-                              <LockKeyhole size={14} />
-                              Frozen for arbitration. Approval, timeout release
-                              and submission are unavailable.
-                            </p>
-                          )}
-                          {m.state === 3 && (
-                            <p className="small text-muted mt-3">
-                              Settled once. Load the matching on-chain
-                              settlement event below for the actual freelancer
-                              allocation, refund and fee; a settled milestone
-                              does not imply a full freelancer payout.
-                            </p>
-                          )}
-                          {current && available.submit && (
-                            <div className="mt-4 space-y-3">
-                              <Field
-                                id="submission-hash"
-                                label="Non-sensitive content hash"
-                                hint="Only this 32-byte hash is public. Upload privately to use a verified SHA-256 content hash; never paste private file contents."
-                              >
-                                <Input
-                                  id="submission-hash"
-                                  aria-describedby="submission-hash-hint"
-                                  placeholder="0x followed by 64 hexadecimal characters"
-                                  value={evidence}
-                                  onChange={(e) =>
-                                    setEvidence(e.target.value.trim())
-                                  }
-                                />
-                              </Field>
-                              <Button
-                                disabled={
-                                  busy ||
-                                  read.isFetching ||
-                                  !validEvidenceHash(evidence)
-                                }
-                                onClick={() => reviewAction("submit")}
-                              >
-                                Submit milestone
-                              </Button>
-                            </div>
-                          )}
-                          {current && m.state === 1 && (
-                            <div className="milestone-actions">
-                              <div className="small text-muted">
-                                Full freelancer payout if approved: gross{" "}
-                                <Money amount={allocation.gross} /> · Service
-                                fee <Money amount={allocation.serviceFee} /> ·
-                                Net <Money amount={allocation.freelancerNet} />
-                              </div>
-                              {available.approve && (
-                                <Button
-                                  disabled={busy || read.isFetching}
-                                  onClick={() => reviewAction("approve")}
-                                >
-                                  Approve & pay milestone
-                                </Button>
-                              )}
-                              {available.release && (
-                                <Button
-                                  disabled={busy || read.isFetching}
-                                  onClick={() => reviewAction("release")}
-                                >
-                                  Release after review timeout
-                                </Button>
-                              )}
-                              {projectRole(project, account) === "Freelancer" &&
-                                !available.release && (
-                                  <p className="small text-muted">
-                                    Timeout release requires chain time strictly
-                                    after the review deadline.
+                          {isCurrent ? (
+                            <div className="milestone-work">
+                              {m.state === 2 && (
+                                <Notice tone="warning">
+                                  <p>
+                                    <LockKeyhole
+                                      size={13}
+                                      className="inline mr-1"
+                                      aria-hidden="true"
+                                    />
+                                    Frozen while the dispute is resolved.
+                                    Approval, submission and release are
+                                    unavailable.
                                   </p>
-                                )}
+                                </Notice>
+                              )}
+                              {available.submit && (
+                                <div
+                                  className="action-box"
+                                  aria-label="Deliver milestone"
+                                >
+                                  <h3>Deliver this milestone</h3>
+                                  {files}
+                                  <Field
+                                    id="submission-hash"
+                                    label="Deliverable fingerprint (SHA-256)"
+                                    hint="Filled in automatically after a private upload. Only this fingerprint is recorded publicly; never paste file contents."
+                                  >
+                                    <Input
+                                      id="submission-hash"
+                                      aria-describedby="submission-hash-hint"
+                                      spellCheck={false}
+                                      placeholder="0x followed by 64 hexadecimal characters"
+                                      value={evidence}
+                                      onChange={(e) =>
+                                        setEvidence(e.target.value.trim())
+                                      }
+                                    />
+                                  </Field>
+                                  <div className="button-row">
+                                    <Button
+                                      disabled={
+                                        disabled || !validEvidenceHash(evidence)
+                                      }
+                                      onClick={() => reviewAction("submit")}
+                                    >
+                                      Submit milestone
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                              {m.state === 1 && (
+                                <div
+                                  className="action-box"
+                                  aria-label="Review milestone"
+                                >
+                                  <h3>
+                                    {role === "Client"
+                                      ? "Review the delivery"
+                                      : "Waiting for client review"}
+                                  </h3>
+                                  {hasEvidence && (
+                                    <p className="small text-muted">
+                                      Submitted fingerprint{" "}
+                                      <Hash value={m.evidenceHash} />
+                                    </p>
+                                  )}
+                                  {files}
+                                  <PayoutBreakdown
+                                    amount={m.amount}
+                                    feeBps={project.feeBps}
+                                  />
+                                  <div className="button-row">
+                                    {available.approve && (
+                                      <Button
+                                        disabled={disabled}
+                                        onClick={() => reviewAction("approve")}
+                                      >
+                                        Approve & pay milestone
+                                      </Button>
+                                    )}
+                                    {available.release && (
+                                      <Button
+                                        disabled={disabled}
+                                        onClick={() => reviewAction("release")}
+                                      >
+                                        Release payment after review period
+                                      </Button>
+                                    )}
+                                  </div>
+                                  {role === "Freelancer" &&
+                                    !available.release && (
+                                      <p className="small text-muted">
+                                        You can release the payment yourself
+                                        strictly after the review deadline (
+                                        {timeUntil(m.reviewEnd, view.now)}).
+                                      </p>
+                                    )}
+                                </div>
+                              )}
+                              {!available.submit && m.state === 0 && files}
+                              {m.state !== 0 && (
+                                <ProjectArbitration
+                                  project={project}
+                                  index={index}
+                                />
+                              )}
                             </div>
-                          )}
-                          {m.state !== 0 && (
-                            <ProjectArbitration
-                              project={project}
-                              index={index}
-                            />
+                          ) : (
+                            <>
+                              {m.state === 3 && (
+                                <p className="small text-muted mt-2">
+                                  Settled once. A dispute ruling may have split
+                                  or refunded it — see Activity for the exact
+                                  payout.
+                                </p>
+                              )}
+                              {m.state !== 0 && (
+                                <Disclosure
+                                  plain
+                                  summary="Files and submission details"
+                                  className="mt-2"
+                                >
+                                  {hasEvidence && (
+                                    <p className="small text-muted">
+                                      Submitted fingerprint{" "}
+                                      <Hash value={m.evidenceHash} />
+                                    </p>
+                                  )}
+                                  {files}
+                                  <ProjectArbitration
+                                    project={project}
+                                    index={index}
+                                  />
+                                </Disclosure>
+                              )}
+                            </>
                           )}
                         </div>
                       </li>
@@ -523,131 +690,172 @@ export function ChainProjectDetail({ id }: { id: bigint }) {
                   })}
                 </ol>
               </Card>
+              <ChainHistory projectIds={[id]} detail />
             </div>
-            <div className="space-y-5">
-              <Card>
-                <CardHeading title="Participants" />
-                <div className="card-body pt-0!">
-                  <p className="small text-muted">Client</p>
-                  <code className="wallet-address">{project.client}</code>
-                  <p className="small text-muted mt-4">Freelancer</p>
-                  <code className="wallet-address">{project.freelancer}</code>
-                  <p className="small text-muted mt-4">Acting wallet</p>
-                  <code className="wallet-address">{account}</code>
-                </div>
+            <aside className="stack" aria-label="Project summary">
+              <Card label="Agreement">
+                <CardHeading title="Agreement" />
+                <CardBody className="pt-2!">
+                  <KeyValue
+                    items={[
+                      {
+                        label: "Budget",
+                        value: <Money amount={project.total} />,
+                      },
+                      {
+                        label: "In escrow",
+                        value: <Money amount={project.escrowRemaining} />,
+                      },
+                      {
+                        label: "Milestones",
+                        value: `${project.currentMilestone} of ${project.milestoneCount} settled`,
+                      },
+                      ...(project.state < 2
+                        ? [
+                            {
+                              label: "Accept by",
+                              value: chainDate(project.acceptBy),
+                            },
+                          ]
+                        : []),
+                      {
+                        label: "Service fee",
+                        value: `${project.feeBps / 100}% of payouts`,
+                      },
+                    ]}
+                  />
+                </CardBody>
               </Card>
-              <Card>
-                <CardHeading title="Protocol accounting" />
-                <div className="card-body pt-0!">
-                  <p className="small text-muted">
-                    Service fee: {project.feeBps / 100}% of freelancer gross,
-                    rounded down in base units.
-                  </p>
-                  <p className="small text-muted mt-4">
-                    Treasury service fees received across all projects:
-                  </p>
-                  <Money amount={view.treasuryRevenue} />
-                  <p className="small text-muted mt-4">
-                    This is cumulative protocol revenue, not the fee for this
-                    project alone. The matching MilestoneSettled event below
-                    records this milestone’s actual fee.
-                  </p>
-                  <p className="wallet-address mt-4">
-                    Metadata hash: {project.metadataHash}
-                  </p>
-                  <Button
-                    variant="secondary"
-                    className="mt-4"
-                    disabled={read.isFetching}
-                    onClick={() => void read.refetch()}
-                  >
-                    Refresh project
-                  </Button>
-                </div>
+              <Card label="People">
+                <CardHeading title="People" />
+                <CardBody className="pt-1!">
+                  {(
+                    [
+                      ["Client", project.client],
+                      ["Freelancer", project.freelancer],
+                    ] as const
+                  ).map(([label, address]) => (
+                    <div className="address-line" key={label}>
+                      <span className="label">
+                        {label}
+                        {address.toLowerCase() === account.toLowerCase() &&
+                          " (you)"}
+                      </span>
+                      <Hash value={address} label={`Copy ${label} address`} />
+                    </div>
+                  ))}
+                </CardBody>
               </Card>
-            </div>
+              {role !== "Viewer" && config && (
+                <Disclosure summary="Edit project details">
+                  <ProjectMetadataEditor
+                    key={`${deploymentScope(config.manifest)}:${account}:${persistent.project?.revision ?? "new"}`}
+                    manifest={config.manifest}
+                    id={id}
+                    project={persistent.project}
+                    fallback={localMetadata}
+                    count={project.milestoneCount}
+                  />
+                </Disclosure>
+              )}
+              <Disclosure summary="Technical details">
+                <KeyValue
+                  stacked
+                  items={[
+                    { label: "Project ID", value: id.toString() },
+                    {
+                      label: "Metadata hash (Keccak-256)",
+                      value: <Hash value={project.metadataHash} full />,
+                    },
+                    { label: "Latest chain time", value: chainDate(view.now) },
+                    {
+                      label: "Description source",
+                      value: persistent.project
+                        ? "Saved project details"
+                        : localMetadata
+                          ? "This browser session only"
+                          : "Not available",
+                    },
+                  ]}
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="mt-3"
+                  disabled={read.isFetching}
+                  onClick={() => void read.refetch()}
+                >
+                  <RefreshCw size={13} aria-hidden="true" />
+                  Refresh project
+                </Button>
+              </Disclosure>
+            </aside>
           </div>
-          <div className="mt-6">
-            <ChainHistory projectIds={[id]} detail />
-          </div>
-        </>
-      )}
+        )}
+      </div>
       <Dialog
         open={!!action}
         onClose={() => setAction(undefined)}
         title={action ? labels[action] : "Review action"}
       >
-        <p>
-          Act as {account ?? "your connected wallet"} on Hardhat Local for
-          project #{id.toString()}.
-        </p>
-        {!sameReviewContext && (
-          <p className="wallet-warning mt-3">
-            The wallet, deployment or milestone changed. Close this dialog and
-            review the action again.
+        <div className="stack-sm">
+          <p>
+            {action === "approveToken"
+              ? "Allow the escrow contract to take exactly the project budget from your wallet. This doesn’t deposit anything yet."
+              : action === "fund"
+                ? "Move the full budget from your wallet into escrow. It stays there until milestones are approved or disputes are settled."
+                : action === "approve" || action === "release"
+                  ? "Settle the current milestone and pay the freelancer, minus the 1% service fee. A milestone can only be paid once."
+                  : action === "submit"
+                    ? "Record your deliverable’s fingerprint on-chain and start the client’s 72-hour review window. The file itself stays private."
+                    : "Accept this funded project and its milestones."}
           </p>
-        )}
-        <p className="small text-muted mt-4">
-          {action === "approveToken"
-            ? "This grants the escrow exactly the required project amount as allowance. It does not deposit tokens or accept the project."
-            : action === "fund"
-              ? "This transfers the full budget from your wallet into escrow. It is separate from token approval."
-              : action === "approve" || action === "release"
-                ? "This permanently settles the current milestone, paying freelancer net of the 1% service fee. It cannot be paid twice."
-                : action === "submit"
-                  ? "Only the non-sensitive evidence hash will be stored publicly on-chain. No files will be uploaded."
-                  : "Accepting activates the funded agreement for this freelancer wallet."}
-        </p>
-        {project && ["fund", "approveToken"].includes(action ?? "") && (
-          <p className="mt-4">
-            <Money amount={project.total} />
-          </p>
-        )}
-        {project &&
-          project.milestones[project.currentMilestone] &&
-          ["approve", "release"].includes(action ?? "") && (
-            <div className="small text-muted mt-4">
-              <p>
-                Milestone {project.currentMilestone + 1} · Gross{" "}
-                <Money
-                  amount={project.milestones[project.currentMilestone].amount}
-                />
-              </p>
-              <p>
-                Service fee{" "}
-                <Money
-                  amount={
-                    normalAllocation(
-                      project.milestones[project.currentMilestone].amount,
-                      project.feeBps,
-                    ).serviceFee
-                  }
-                />{" "}
-                · Freelancer net{" "}
-                <Money
-                  amount={
-                    normalAllocation(
-                      project.milestones[project.currentMilestone].amount,
-                      project.feeBps,
-                    ).freelancerNet
-                  }
-                />
-              </p>
-            </div>
+          {project && ["fund", "approveToken"].includes(action ?? "") && (
+            <KeyValue
+              items={[
+                { label: "Amount", value: <Money amount={project.total} /> },
+              ]}
+            />
           )}
-        <Button
-          className="w-full mt-5"
-          disabled={
-            busy ||
-            !read.deployment.ready ||
-            read.isFetching ||
-            !actionAllowed ||
-            !sameReviewContext
-          }
-          onClick={() => void confirm()}
-        >
-          Confirm in wallet
-        </Button>
+          {project &&
+            project.milestones[project.currentMilestone] &&
+            ["approve", "release"].includes(action ?? "") && (
+              <PayoutBreakdown
+                amount={project.milestones[project.currentMilestone].amount}
+                feeBps={project.feeBps}
+              />
+            )}
+          {action === "submit" && (
+            <p className="small text-muted">
+              Fingerprint <Hash value={evidence} />
+            </p>
+          )}
+          {!sameReviewContext && (
+            <Notice tone="warning">
+              <p>
+                The wallet, deployment or milestone changed. Close this dialog
+                and review the action again.
+              </p>
+            </Notice>
+          )}
+          <p className="small text-faint">
+            Project #{id.toString()} · Acting as{" "}
+            {account ?? "your connected wallet"}
+          </p>
+          <Button
+            className="btn-block"
+            disabled={
+              busy ||
+              !read.deployment.ready ||
+              read.isFetching ||
+              !actionAllowed ||
+              !sameReviewContext
+            }
+            onClick={() => void confirm()}
+          >
+            Confirm in wallet
+          </Button>
+        </div>
       </Dialog>
     </>
   );

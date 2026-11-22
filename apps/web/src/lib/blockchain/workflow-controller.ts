@@ -14,6 +14,13 @@ import {
 } from "./deployment";
 import { IntegrationError } from "./errors";
 import {
+  accountPool,
+  assertNoPooledTransactions,
+  classifyUnmined,
+  nonceGapMessage,
+  type PoolClient,
+} from "./pool";
+import {
   createTransactionController,
   requestWalletSignature,
   type TransactionLifecycle,
@@ -85,6 +92,12 @@ export function makeProtocolController(
         "network",
         "Wallet account or chain changed before signing.",
       );
+    // The node's pool survives page refreshes and wallet restarts, unlike this
+    // session's memory: never send a new write while it still holds one.
+    if (trackTransaction)
+      assertNoPooledTransactions(
+        await accountPool(localClient as unknown as PoolClient, address),
+      );
     if (trackTransaction) attemptId = session.begin(manifest, address, details);
     const assertCurrent = async () => {
       if (
@@ -115,7 +128,8 @@ export function makeProtocolController(
           .catch(() => {});
     },
     wait: async (hash, onReplaced) => {
-      const receipt = await localClient.waitForTransactionReceipt({
+      let settled = false;
+      const receipt = localClient.waitForTransactionReceipt({
         hash,
         confirmations: 1,
         timeout: 60_000,
@@ -126,9 +140,34 @@ export function makeProtocolController(
             hash: replacement.transactionReceipt.transactionHash,
           }),
       });
-      if (validatedManifest)
-        await verifyManifest(localClient, validatedManifest);
-      return receipt;
+      // A transaction queued behind a nonce gap never produces a receipt.
+      // Detect it from the node instead of waiting out the timeout.
+      const gap = (async (): Promise<never> => {
+        for (;;) {
+          await new Promise((r) => setTimeout(r, 2000));
+          if (settled) return new Promise<never>(() => {});
+          const status = await classifyUnmined(
+            localClient as unknown as PoolClient,
+            hash,
+          ).catch(() => undefined);
+          if (settled) return new Promise<never>(() => {});
+          if (status?.kind === "nonce-gap")
+            throw new IntegrationError(
+              "nonce",
+              nonceGapMessage(status.nonce, status.expected),
+            );
+        }
+      })();
+      try {
+        const result = await Promise.race([receipt, gap]);
+        if (validatedManifest)
+          await verifyManifest(localClient, validatedManifest);
+        return result;
+      } finally {
+        settled = true;
+        receipt.catch(() => {});
+        gap.catch(() => {});
+      }
     },
     refresh: () =>
       queryClient.invalidateQueries(

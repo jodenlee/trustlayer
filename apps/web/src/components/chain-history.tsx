@@ -2,7 +2,14 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useConnection } from "wagmi";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useVerifiedDeployment } from "@/lib/blockchain/hooks/use-protocol";
+import {
+  accountPool,
+  classifyUnmined,
+  nonceGapMessage,
+  type PoolClient,
+} from "@/lib/blockchain/pool";
 import {
   useProjectHistory,
   useWalletProjects,
@@ -15,31 +22,21 @@ import { describeError } from "@/lib/blockchain/errors";
 import {
   Button,
   Card,
+  CardBody,
+  CardFooter,
   CardHeading,
   DataTable,
   EmptyState,
+  Hash,
+  LoadingRow,
+  Notice,
   PageHeading,
 } from "./ui";
 import { Money } from "./money";
-import { usePreview } from "./providers";
 import { useWalletCases } from "@/lib/blockchain/hooks/use-arbitration";
 
 export function HashCopy({ hash }: { hash: `0x${string}` }) {
-  const { toast } = usePreview();
-  return (
-    <button
-      className="text-link wallet-address"
-      title={hash}
-      onClick={() => {
-        void navigator.clipboard
-          .writeText(hash)
-          .then(() => toast("Transaction hash copied."))
-          .catch(() => toast(`Copy unavailable. Transaction hash: ${hash}`));
-      }}
-    >
-      {hash.slice(0, 10)}…{hash.slice(-8)} · Copy
-    </button>
-  );
+  return <Hash value={hash} label="Copy transaction hash" />;
 }
 export function ChainHistory({
   projectIds,
@@ -52,14 +49,14 @@ export function ChainHistory({
 }) {
   const history = useProjectHistory(projectIds, disputeIds);
   return (
-    <Card>
+    <Card label="Activity">
       <CardHeading
-        title={
+        title={detail ? "Activity" : "On-chain activity"}
+        description={
           detail
-            ? "On-chain project events & payouts"
-            : "On-chain event history"
+            ? "Confirmed blockchain events, including exact payouts and fees."
+            : "Confirmed blockchain events for your projects and disputes."
         }
-        description="Confirmed protocol events and wallet approvals; bounded pages of 200 blocks. Related-case events are distinct from this wallet's actions."
       />
       {history.error ? (
         <EmptyState
@@ -73,13 +70,11 @@ export function ChainHistory({
         />
       ) : !history.deployment.readable ? (
         <EmptyState
-          title="Verify deployment to read history"
-          description="No historical transactions are invented when data is unavailable."
+          title="Waiting for the local network"
+          description="Activity loads once your wallet and the contracts are verified."
         />
       ) : history.isPending ? (
-        <div role="status" className="empty-state">
-          Loading on-chain event history…
-        </div>
+        <LoadingRow label="Loading on-chain activity…" />
       ) : history.entries.length ? (
         <DataTable
           caption="Confirmed on-chain events"
@@ -90,10 +85,9 @@ export function ChainHistory({
               title: "Event",
               render: (e) => (
                 <div>
-                  <strong>{e.kind}</strong>
-                  <p className="project-subtitle">
-                    On-chain event · Confirmed
-                    {` · ${e.activity ?? "Related project event"}`}
+                  <span className="row-title">{e.kind}</span>
+                  <p className="row-subtitle">
+                    {e.activity ?? "Related project event"}
                     {e.disputeId !== undefined && (
                       <>
                         {" "}
@@ -154,34 +148,46 @@ export function ChainHistory({
         />
       ) : (
         <EmptyState
-          title="No matching events in these blocks"
-          description="Load earlier blocks for older activity. An empty page is not a statement that a project has never transacted."
+          title={
+            history.hasNextPage
+              ? "No matching events in these blocks"
+              : "No activity yet"
+          }
+          description={
+            history.hasNextPage
+              ? "Load earlier blocks to see older activity."
+              : "Confirmed transactions will appear here."
+          }
         />
       )}
-      <div className="card-body card-divider flex flex-wrap items-center gap-3">
+      <CardFooter>
         {history.data?.pages[0] && (
-          <span className="small text-muted">
-            Loaded block range {history.data.pages.at(-1)!.fromBlock.toString()}
-            –{history.data.pages[0].toBlock.toString()}
+          <span>
+            Blocks {history.data.pages.at(-1)!.fromBlock.toString()}–
+            {history.data.pages[0].toBlock.toString()}
           </span>
         )}
-        {history.hasNextPage && (
+        <span className="ml-auto button-row">
+          {history.hasNextPage && (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={history.isFetching || !history.deployment.ready}
+              onClick={() => void history.fetchNextPage()}
+            >
+              Load earlier events
+            </Button>
+          )}
           <Button
-            variant="secondary"
+            variant="ghost"
+            size="sm"
             disabled={history.isFetching || !history.deployment.ready}
-            onClick={() => void history.fetchNextPage()}
+            onClick={() => void history.refetch()}
           >
-            Load earlier events
+            Refresh events
           </Button>
-        )}
-        <Button
-          variant="ghost"
-          disabled={history.isFetching || !history.deployment.ready}
-          onClick={() => void history.refetch()}
-        >
-          Refresh events
-        </Button>
-      </div>
+        </span>
+      </CardFooter>
     </Card>
   );
 }
@@ -207,17 +213,17 @@ export function SessionHistory({
     .reverse()
     .slice(0, confirmedOnly ? 5 : undefined);
   return (
-    <Card>
+    <Card label="Requests this session">
       <CardHeading
         title={
           confirmedOnly
             ? "Recently confirmed this session"
-            : "This browser session"
+            : "Requests this session"
         }
-        description="In-memory client requests, separate from event history. Refreshing the page clears these records."
+        description="Wallet requests made in this browser tab, including ones still waiting for confirmation. Cleared when you refresh."
       />
       {error && (
-        <p role="alert" className="form-error m-5">
+        <p role="alert" className="form-error mx-5 mt-3">
           {error}
         </p>
       )}
@@ -231,9 +237,9 @@ export function SessionHistory({
               title: "Action",
               render: (a) => (
                 <div>
-                  <strong>{a.kind}</strong>
-                  <p className="project-subtitle">
-                    Session request · {a.state.phase}
+                  <span className="row-title">{a.kind}</span>
+                  <p className="row-subtitle">
+                    {a.state.phase}
                     {a.projectId !== undefined && ` · Project #${a.projectId}`}
                     {a.disputeId !== undefined && (
                       <>
@@ -275,7 +281,7 @@ export function SessionHistory({
                   {a.state.hash ? (
                     <HashCopy hash={a.state.hash} />
                   ) : (
-                    <span className="small text-muted">No submitted hash</span>
+                    <span className="small text-muted">Not submitted</span>
                   )}
                   {a.state.hash &&
                     ["unconfirmed", "confirming", "submitted"].includes(
@@ -283,6 +289,7 @@ export function SessionHistory({
                     ) && (
                       <Button
                         variant="secondary"
+                        size="sm"
                         className="mt-2"
                         disabled={checking !== undefined}
                         onClick={async () => {
@@ -335,8 +342,18 @@ export function SessionHistory({
                               queryKey: ["trustlayer"],
                             });
                           } catch (e) {
+                            const status = await classifyUnmined(
+                              localClient as unknown as PoolClient,
+                              a.state.hash!,
+                            ).catch(() => undefined);
                             setError(
-                              `Receipt remains unresolved. ${e instanceof Error ? e.message : describeError(e).message}`,
+                              status?.kind === "nonce-gap"
+                                ? nonceGapMessage(status.nonce, status.expected)
+                                : status?.kind === "pending"
+                                  ? "Receipt remains unresolved: still waiting to be mined. Check again shortly; do not resubmit."
+                                  : status?.kind === "unknown"
+                                    ? "Receipt remains unresolved: the local node has no record of this transaction."
+                                    : `Receipt remains unresolved. ${e instanceof Error ? e.message : describeError(e).message}`,
                             );
                           } finally {
                             setChecking(undefined);
@@ -354,8 +371,84 @@ export function SessionHistory({
       ) : (
         <EmptyState
           title="No transaction requests this session"
-          description="Submitted and confirmed requests appear here only after real wallet actions. No sample transactions are added."
+          description="Wallet requests you make in this tab will appear here."
         />
+      )}
+    </Card>
+  );
+}
+/** The local node's own view of this wallet's unmined transactions (read-only). */
+export function PoolTransactions() {
+  const deployment = useVerifiedDeployment();
+  const address = deployment.address;
+  const pool = useQuery({
+    queryKey: ["trustlayer", "pool", address, deployment.chainId],
+    enabled: deployment.readable && !!address,
+    refetchInterval: 10_000,
+    gcTime: 0,
+    queryFn: () => accountPool(localClient as unknown as PoolClient, address!),
+  });
+  const data = pool.data;
+  if (
+    !data ||
+    (!data.transactions.length && data.pendingNonce === data.latestNonce)
+  )
+    return null;
+  const stuck = data.transactions.filter((t) => t.status === "queued");
+  return (
+    <Card label="Waiting in the local node">
+      <CardHeading
+        title="Waiting in the local node"
+        description={`Transactions from this wallet that the node has received but not mined. The chain expects nonce ${data.latestNonce} next.`}
+      />
+      <DataTable
+        caption="Unmined transactions in the local node"
+        rows={data.transactions}
+        rowKey={(t) => t.hash}
+        columns={[
+          {
+            title: "Status",
+            render: (t) =>
+              t.status === "queued" ? (
+                <span className="status status-danger">Stuck (nonce gap)</span>
+              ) : (
+                <span className="status status-warning">Pending</span>
+              ),
+          },
+          { title: "Nonce", render: (t) => String(t.nonce) },
+          { title: "Transaction", render: (t) => <HashCopy hash={t.hash} /> },
+        ]}
+      />
+      {stuck.length > 0 && (
+        <CardBody>
+          <Notice tone="warning" title="These can never be mined as they are">
+            <p>
+              Your wallet signed them with nonce{" "}
+              {stuck.map((t) => t.nonce).join(", ")}, but this chain expects{" "}
+              {data.latestNonce}. They did not execute and nothing was paid. Do
+              not resubmit and do not send other transactions from this wallet
+              yet: filling the gap would make them execute later.
+            </p>
+            <ol className="list-decimal pl-5 mt-2 grid gap-1">
+              <li>
+                Stop using this wallet in TrustLayer. Note the hashes above.
+              </li>
+              <li>
+                In a terminal, remove exactly these queued hashes from the local
+                node: <code>npm.cmd run dev:drop-queued -- --hash 0x…</code>{" "}
+                (one <code>--hash</code> per transaction). It refuses anything
+                that is mined or not nonce-gapped.
+              </li>
+              <li>
+                In MetaMask, on the local network with this account selected:
+                Settings → Advanced → Clear activity and nonce data. This only
+                resets MetaMask’s local history so it uses nonce{" "}
+                {data.latestNonce}.
+              </li>
+              <li>Reload TrustLayer and submit the action once.</li>
+            </ol>
+          </Notice>
+        </CardBody>
       )}
     </Card>
   );
@@ -367,21 +460,23 @@ export function WalletTransactions() {
     <>
       <PageHeading
         title="Transactions"
-        description="On-chain events and this session’s client requests, with explicit sources."
+        description="Your confirmed on-chain activity, plus wallet requests from this session."
       />
-      <div className="space-y-5">
+      <div className="stack">
+        <PoolTransactions />
         <SessionHistory />
         {projects.hasNextPage && (
-          <div className="info-note">
-            Project events are filtered to loaded wallet projects.
+          <Notice tone="neutral">
+            <p>Activity covers your most recent projects.</p>
             <Button
               variant="secondary"
+              size="sm"
               disabled={projects.isFetching || !projects.deployment.ready}
               onClick={() => void projects.fetchNextPage()}
             >
               Load earlier wallet projects
             </Button>
-          </div>
+          </Notice>
         )}
         {cases.error && (
           <p role="alert" className="form-error">
@@ -389,16 +484,17 @@ export function WalletTransactions() {
           </p>
         )}
         {cases.hasNextPage && (
-          <div className="info-note">
-            Case history is limited to loaded cases.{" "}
+          <Notice tone="neutral">
+            <p>Activity covers your most recent disputes.</p>
             <Button
               variant="secondary"
+              size="sm"
               disabled={cases.isFetching || !cases.deployment.ready}
               onClick={() => void cases.fetchNextPage()}
             >
               Load earlier wallet disputes
             </Button>
-          </div>
+          </Notice>
         )}
         <ChainHistory
           projectIds={[

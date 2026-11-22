@@ -1,50 +1,40 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import {
   accountA,
   accountB,
-  connectWallet,
   installRpc,
   installWallet,
 } from "./wallet-fixture";
+import { installAuth, signIn, switchAccount } from "./auth-fixture";
+
+const connect = (page: Page) =>
+  page.getByRole("button", { name: "Connect wallet", exact: true }).click();
 
 test("missing provider renders wallet setup without requesting credentials", async ({
   page,
 }) => {
+  await installAuth(page);
   await page.goto("/settings");
-  await page
-    .getByRole("button", { name: "Connect wallet", exact: true })
-    .first()
-    .click();
+  await expect(page).toHaveURL(/\/sign-in/);
   await expect(
-    page.getByRole("heading", { name: "No injected wallet detected" }),
+    page.getByRole("heading", { name: "No browser wallet found" }),
   ).toBeVisible();
-  await expect(page.getByRole("dialog")).toContainText(
-    "Never enter a private key or recovery phrase",
+  await expect(page.getByRole("main")).toContainText(
+    "never asks for a private key or recovery phrase",
   );
+  await expect(page.getByTestId("live-balance")).toHaveCount(0);
 });
 test("connection reads real-provider data, displays metadata, and disconnect clears it", async ({
   page,
 }) => {
   await installWallet(page);
   await installRpc(page);
+  await installAuth(page);
   await page.goto("/settings");
-  await expect(page.getByRole("main").getByTestId("live-balance")).toHaveText(
-    "—",
-  );
-  await connectWallet(page);
-  await expect(
-    page.getByText("Wallet connected", { exact: true }),
-  ).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(page.getByTestId("live-balance")).toContainText("123.456789");
-  await expect(page.getByText("mUSD · 6 decimals · on-chain")).toBeVisible();
-  await expect(
-    page.getByText("Verified on RPC & wallet", { exact: true }),
-  ).toBeVisible();
-  await expect(page.getByText("MockUSD", { exact: true })).toBeVisible();
-  await expect(
-    page.getByText("Current treasury owner", { exact: true }),
-  ).toBeVisible();
+  await expect(page).toHaveURL(/\/sign-in/);
+  await expect(page.getByTestId("live-balance")).toHaveCount(0);
+  await connect(page);
+  await expect(page.getByText(/0x1111…1111 · Hardhat Local/)).toBeVisible();
   expect(
     await page.evaluate(() =>
       window.__testWallet.calls.filter((method) =>
@@ -53,51 +43,76 @@ test("connection reads real-provider data, displays metadata, and disconnect cle
     ),
   ).toEqual([]);
   await page
+    .getByRole("button", { name: "Sign in with Ethereum", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.getByTestId("live-balance")).toContainText("123.456789");
+  await expect(
+    page.getByText("Verified on RPC & wallet", { exact: true }),
+  ).toBeVisible();
+  await page.getByText("Protocol & contract details").click();
+  await expect(page.getByText("mUSD · 6 decimals · on-chain")).toBeVisible();
+  await expect(page.getByText("MockUSD", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Current treasury owner", { exact: true }),
+  ).toBeVisible();
+  // The only signature is the explicit SIWE sign-in; no transaction is sent.
+  expect(
+    await page.evaluate(() =>
+      window.__testWallet.calls.filter((method) =>
+        /sendTransaction|sign/i.test(method),
+      ),
+    ),
+  ).toEqual(["personal_sign"]);
+  await page
+    .getByRole("main")
     .getByRole("button", { name: "Manage wallet", exact: true })
-    .first()
     .click();
   await page
     .getByRole("button", { name: "Disconnect wallet", exact: true })
     .click();
-  await page.keyboard.press("Escape");
-  await expect(page.getByTestId("live-balance")).toHaveText("—");
+  await expect(page).toHaveURL(/\/sign-in/);
+  await expect(page.getByTestId("live-balance")).toHaveCount(0);
   await expect(
     page.getByText("Verified on RPC & wallet", { exact: true }),
   ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Connect wallet", exact: true }),
+  ).toBeVisible();
 });
 test("wallet rejection is displayed and never becomes a connected balance", async ({
   page,
 }) => {
   await installWallet(page, { rejected: true });
   await installRpc(page);
+  await installAuth(page);
   await page.goto("/dashboard");
-  await connectWallet(page);
+  await connect(page);
   await expect(
     page.getByRole("alert", { name: "Wallet request error" }),
   ).toContainText("Request rejected");
-  await expect(page.getByTestId("live-balance")).toHaveText("—");
+  await expect(page).toHaveURL(/\/sign-in/);
+  await expect(
+    page.getByRole("button", { name: "Sign in with Ethereum" }),
+  ).toHaveCount(0);
+  await expect(page.getByTestId("live-balance")).toHaveCount(0);
 });
 test("account changes refetch balances and provider disconnection removes them", async ({
   page,
 }) => {
   await installWallet(page);
   await installRpc(page);
-  await page.goto("/settings");
-  await connectWallet(page);
-  await page.keyboard.press("Escape");
+  await installAuth(page);
+  await signIn(page, "/settings");
   await expect(page.getByTestId("live-balance")).toContainText("123.456789");
-  await page.evaluate(
-    (address) => window.__testWallet.account(address),
-    accountB,
-  );
+  await switchAccount(page, accountB);
   await expect(page.getByTestId("live-balance")).toContainText("9.876543");
-  await expect(
-    page.getByRole("button", { name: "Manage wallet", exact: true }).first(),
-  ).toContainText("0x2222");
+  await expect(page.getByRole("main").getByTitle(accountB)).toBeVisible();
   await page.evaluate(() => window.__testWallet.disconnect());
-  await expect(page.getByTestId("live-balance")).toHaveText("—");
+  await expect(page).toHaveURL(/\/sign-in/);
+  await expect(page.getByTestId("live-balance")).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Connect wallet", exact: true }).first(),
+    page.getByRole("button", { name: "Connect wallet", exact: true }),
   ).toBeVisible();
 });
 test("wrong network pauses reads and explicit switch can add the local network", async ({
@@ -105,38 +120,45 @@ test("wrong network pauses reads and explicit switch can add the local network",
 }) => {
   await installWallet(page, { chainId: 1, unknownNetwork: true });
   await installRpc(page);
+  await installAuth(page);
   await page.goto("/dashboard");
-  await connectWallet(page);
-  await expect(page.getByRole("dialog")).toContainText("Ethereum (1)");
+  await connect(page);
+  await expect(page.getByRole("main")).toContainText(
+    "Your wallet is on Ethereum (1)",
+  );
+  await expect(
+    page.getByRole("button", { name: "Sign in with Ethereum" }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Switch to Hardhat Local" }).click();
   await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Switch to Hardhat Local" })
+    .getByRole("button", { name: "Sign in with Ethereum", exact: true })
     .click();
-  await expect(page.getByRole("dialog")).toContainText("Hardhat Local");
-  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.getByTestId("live-balance")).toContainText("123.456789");
   expect(await page.evaluate(() => window.__testWallet.calls)).toContain(
     "wallet_addEthereumChain",
   );
   await page.evaluate(() => window.__testWallet.chain(11155111));
-  await expect(page.getByTestId("live-balance")).toHaveText("—");
-  await expect(page.getByText(/Unsupported network: Sepolia/)).toBeVisible();
+  await expect(page).toHaveURL(/\/sign-in/);
+  await expect(page.getByTestId("live-balance")).toHaveCount(0);
+  await expect(page.getByText(/Your wallet is on Sepolia/)).toBeVisible();
 });
 test("rejected network switch retains mismatch and disabled reads", async ({
   page,
 }) => {
   await installWallet(page, { chainId: 1, switchRejected: true });
   await installRpc(page);
+  await installAuth(page);
   await page.goto("/dashboard");
-  await connectWallet(page);
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Switch to Hardhat Local" })
-    .click();
+  await connect(page);
+  await page.getByRole("button", { name: "Switch to Hardhat Local" }).click();
   await expect(
     page.getByRole("alert", { name: "Network request error" }),
   ).toContainText("Request rejected");
-  await expect(page.getByTestId("live-balance")).toHaveText("—");
+  await expect(
+    page.getByRole("button", { name: "Sign in with Ethereum" }),
+  ).toHaveCount(0);
+  await expect(page.getByTestId("live-balance")).toHaveCount(0);
 });
 for (const [name, options, message] of [
   ["unavailable RPC", { unavailable: true }, "Local blockchain unavailable"],
@@ -150,9 +172,8 @@ for (const [name, options, message] of [
   }) => {
     await installWallet(page);
     await installRpc(page, options);
-    await page.goto("/dashboard");
-    await connectWallet(page);
-    await page.keyboard.press("Escape");
+    await installAuth(page);
+    await signIn(page, "/dashboard");
     await expect(
       page.getByRole("alert", { name: "Deployment setup" }),
     ).toContainText(message);
@@ -163,9 +184,8 @@ test("wallet on another 31337 instance fails the block-identity check", async ({
 }) => {
   await installWallet(page, { walletWrongBlock: true });
   await installRpc(page);
-  await page.goto("/dashboard");
-  await connectWallet(page);
-  await page.keyboard.press("Escape");
+  await installAuth(page);
+  await signIn(page, "/dashboard");
   await expect(
     page.getByRole("alert", { name: "Deployment setup" }),
   ).toContainText("Local setup required");
@@ -178,35 +198,30 @@ for (const [name, options] of [
   test(`${name} is not a successful token read`, async ({ page }) => {
     await installWallet(page);
     await installRpc(page, options);
-    await page.goto("/dashboard");
-    await connectWallet(page);
-    await page.keyboard.press("Escape");
+    await installAuth(page);
+    await signIn(page, "/dashboard");
     await expect(
       page.getByRole("alert", { name: "Token read error" }),
     ).toContainText("Token read failed");
     await expect(page.getByTestId("live-balance")).toHaveText("—");
   });
-test("connected wallet replaces samples with real project reads and empty history", async ({
+test("signed-in wallet shows real project reads and empty history", async ({
   page,
 }, testInfo) => {
   await installWallet(page);
   await installRpc(page);
-  await page.goto("/dashboard");
-  await connectWallet(page);
-  await page.keyboard.press("Escape");
-  await expect(
-    page.getByText("On-chain workspace", { exact: true }),
-  ).toBeVisible();
+  await installAuth(page);
+  await signIn(page, "/dashboard");
   await expect(
     page.getByText("Fictional sample data", { exact: false }),
   ).toHaveCount(0);
   await expect(
-    page.getByRole("heading", { name: "No on-chain projects yet" }),
+    page.getByRole("heading", { name: "No projects yet" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "You’re all caught up" }),
   ).toBeVisible();
   await expect(page.getByTestId("live-balance")).toContainText("123.456789");
-  await expect(
-    page.getByText(accountA, { exact: true }).filter({ visible: true }),
-  ).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -229,6 +244,16 @@ test("connected wallet replaces samples with real project reads and empty histor
   ).toBeVisible();
   await expect(page.locator("table")).toHaveCount(0);
   await expect(
-    page.getByRole("heading", { name: "No matching events in these blocks" }),
+    page.getByRole("heading", {
+      name: /No matching events in these blocks|No activity yet/,
+    }),
   ).toBeVisible();
+  if (await page.getByRole("button", { name: "Open navigation" }).isVisible())
+    await page.getByRole("button", { name: "Open navigation" }).click();
+  await page
+    .getByRole("navigation", { name: "Workspace navigation" })
+    .filter({ visible: true })
+    .getByRole("link", { name: "Settings", exact: true })
+    .click();
+  await expect(page.getByRole("main").getByTitle(accountA)).toBeVisible();
 });

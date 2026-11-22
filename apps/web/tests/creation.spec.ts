@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { escrowRpc } from "../test-support/escrow-rpc";
-import { installWallet, connectWallet, accountB } from "./wallet-fixture";
+import { installWallet, accountB } from "./wallet-fixture";
+import { installAuth, signIn } from "./auth-fixture";
 
 async function reviewProject(
   page: Page,
@@ -8,10 +9,25 @@ async function reviewProject(
   deferSigning = false,
 ) {
   await installWallet(page, { forwardRpc: true, deferSigning });
+  await installAuth(page);
   await state.install(page);
-  await page.goto("/projects/new");
-  await connectWallet(page);
-  await page.keyboard.press("Escape");
+  // Saving descriptive details succeeds after a confirmed creation.
+  await page.route("**/api/projects/**", (route) =>
+    route.request().method() === "PUT"
+      ? route.fulfill({
+          json: {
+            project: {
+              id: "fixture",
+              title: "Creation regression",
+              description: "Public test scope",
+              revision: 1,
+              milestones: [],
+            },
+          },
+        })
+      : route.fallback(),
+  );
+  await signIn(page, "/projects/new");
   await page.getByLabel("Project name").fill("Creation regression");
   await page.getByLabel("Scope of work").fill("Public test scope");
   await page.getByLabel("Freelancer wallet address").fill(accountB);
@@ -67,15 +83,19 @@ test("zero mUSD creation visibly waits for the wallet and receipt before navigat
   ).toBeDisabled();
   await expect(page).toHaveURL(/\/projects\/new$/);
   await page.evaluate(() => window.__testWallet.confirmSigning());
-  await expect(dialog.getByText("confirming", { exact: true })).toBeVisible();
-  await expect(dialog.locator("code")).toHaveText(/^0x[\da-f]{64}$/i);
+  await expect(
+    dialog.getByText("Waiting for confirmation…", { exact: true }),
+  ).toBeVisible();
+  await dialog.getByText("Transaction details", { exact: true }).click();
+  await expect(dialog.locator(".hash-full")).toHaveText(/^0x[\da-f]{64}$/i);
   expect(state.writes).toEqual(["createProject"]);
   state.defer(false);
   await expect(page).toHaveURL(/\/projects\/0$/);
   await expect(
-    page.getByText("Project #0 created. Funding is a separate step.", {
-      exact: true,
-    }),
+    page.getByText(
+      "Project #0 created on-chain. Metadata synchronized. Funding is a separate step.",
+      { exact: true },
+    ),
   ).toBeVisible();
   expect(state.projects[0].state).toBe(0);
   expect(state.projects[0].remaining).toBe(0n);
@@ -140,7 +160,7 @@ test("invalid creation draft shows validation without signing", async ({
 });
 
 for (const change of ["chain", "disconnect"] as const)
-  test(`creation review explains ${change} changes and prevents signing`, async ({
+  test(`creation review ${change} change ends the session and prevents signing`, async ({
     page,
   }) => {
     const state = escrowRpc({ empty: true, balance: 0n });
@@ -149,18 +169,17 @@ for (const change of ["chain", "disconnect"] as const)
       if (change === "chain") window.__testWallet.chain(1);
       else window.__testWallet.disconnect();
     }, change);
+    // The signed-in identity no longer matches: the session is revoked, the
+    // review dialog disappears and nothing can be signed.
+    await expect(page).toHaveURL(/\/sign-in\?next=%2Fprojects%2Fnew/);
+    await expect(dialog).toHaveCount(0);
     await expect(
-      dialog.getByRole("button", {
-        name: "Create project · not enabled",
-        exact: true,
-      }),
-    ).toBeDisabled();
-    await expect(
-      dialog.getByText(
-        change === "chain"
-          ? "Switch your wallet to Hardhat Local (31337)."
-          : /Connect a wallet to a verified persistent local deployment/,
+      page.getByRole("button", { name: "Create project in wallet" }),
+    ).toHaveCount(0);
+    expect(
+      await page.evaluate(() =>
+        window.__testWallet.calls.includes("eth_sendTransaction"),
       ),
-    ).toBeVisible();
+    ).toBe(false);
     expect(state.writes).toEqual([]);
   });

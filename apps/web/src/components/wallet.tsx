@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   useConnect,
   useConnection,
@@ -9,13 +9,12 @@ import {
   type Connector,
 } from "wagmi";
 import { useQueryClient } from "@tanstack/react-query";
-import { Wallet } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Dialog } from "./dialog";
-import { Button } from "./ui";
-import { usePreview } from "./providers";
+import { Button, Hash, KeyValue, Notice } from "./ui";
 import { localChain } from "@/lib/blockchain/config";
-import { describeError, shortenAddress } from "@/lib/blockchain/errors";
-import { BackendAuthControl } from "./backend-auth";
+import { describeError } from "@/lib/blockchain/errors";
+import { useBackendAuth } from "./auth-provider";
 
 export function walletNetwork(chainId?: number) {
   return chainId === localChain.id
@@ -28,87 +27,11 @@ export function walletNetwork(chainId?: number) {
           ? `Unsupported network (${chainId})`
           : "Not connected";
 }
-export function WalletControl() {
-  const { openWallet } = usePreview();
-  const { address, isConnected, isConnecting, isReconnecting } =
-    useConnection();
-  const restoring = isConnecting || isReconnecting;
-  return (
-    <Button
-      variant="secondary"
-      aria-label={
-        restoring
-          ? "Restoring wallet"
-          : isConnected
-            ? "Manage wallet"
-            : "Connect wallet"
-      }
-      disabled={restoring}
-      onClick={openWallet}
-    >
-      <Wallet size={16} aria-hidden="true" />
-      <span>
-        {restoring
-          ? "Restoring wallet…"
-          : isConnected && address
-            ? shortenAddress(address)
-            : "Connect wallet"}
-      </span>
-    </Button>
-  );
-}
-export function WalletNetworkStatus() {
-  const { isConnected, chainId, isConnecting, isReconnecting } =
-    useConnection();
-  return (
-    <span
-      className={`disconnected ${isConnected && chainId !== localChain.id ? "network-warning" : ""}`}
-    >
-      <span className="status-dot" />
-      {isConnecting || isReconnecting
-        ? "Restoring wallet…"
-        : isConnected
-          ? walletNetwork(chainId)
-          : "Not connected"}
-    </span>
-  );
-}
-export function SwitchNetworkButton() {
-  const mutation = useSwitchChain();
-  return (
-    <>
-      <Button
-        variant="secondary"
-        disabled={mutation.isPending}
-        onClick={() => mutation.mutate({ chainId: localChain.id })}
-      >
-        {mutation.isPending ? "Check your wallet…" : "Switch to Hardhat Local"}
-      </Button>
-      {mutation.error && (
-        <p
-          role="alert"
-          aria-label="Network request error"
-          className="small text-red-700 mt-2"
-        >
-          {describeError(mutation.error).message}
-        </p>
-      )}
-    </>
-  );
-}
-export function WalletDialog({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
+/** Injected wallets that actually expose a provider in this browser. */
+export function useInjectedConnectors() {
   const connectors = useConnectors();
-  const connection = useConnection();
-  const connect = useConnect();
-  const disconnect = useDisconnect();
-  const queryClient = useQueryClient();
   const [available, setAvailable] = useState<Connector[] | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let cancelled = false;
     Promise.all(
@@ -127,95 +50,141 @@ export function WalletDialog({
     return () => {
       cancelled = true;
     };
-  }, [connectors]);
+  }, [connectors, attempt]);
+  const recheck = useCallback(() => {
+    setAvailable(null);
+    setAttempt((n) => n + 1);
+  }, []);
+  return { available, recheck };
+}
+/** Disconnect the app's wallet connection and drop cached chain reads. */
+export function useWalletDisconnect() {
+  const connection = useConnection();
+  const disconnect = useDisconnect();
+  const connect = useConnect();
+  const queryClient = useQueryClient();
+  return {
+    pending: disconnect.isPending,
+    error: disconnect.error,
+    async run() {
+      await disconnect.mutateAsync({ connector: connection.connector });
+      await queryClient.cancelQueries({ queryKey: ["trustlayer"] });
+      queryClient.removeQueries({ queryKey: ["trustlayer"] });
+      connect.reset();
+    },
+  };
+}
+export function SwitchNetworkButton({ block = false }: { block?: boolean }) {
+  const mutation = useSwitchChain();
+  return (
+    <>
+      <Button
+        variant="primary"
+        className={block ? "btn-block" : ""}
+        disabled={mutation.isPending}
+        onClick={() => mutation.mutate({ chainId: localChain.id })}
+      >
+        {mutation.isPending
+          ? "Check your wallet…"
+          : `Switch to ${localChain.name}`}
+      </Button>
+      {mutation.error && (
+        <p
+          role="alert"
+          aria-label="Network request error"
+          className="form-error"
+        >
+          {describeError(mutation.error).message}
+        </p>
+      )}
+    </>
+  );
+}
+/** In-app wallet & account dialog. Sign-in itself happens on /sign-in. */
+export function WalletDialog({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const connection = useConnection();
+  const auth = useBackendAuth();
+  const router = useRouter();
+  const wallet = useWalletDisconnect();
+  const [error, setError] = useState("");
   return (
     <Dialog open={open} onClose={onClose} title="Wallet connection">
       {connection.isConnected && connection.address ? (
-        <>
-          <span className="badge badge-green">Wallet connected</span>
-          <p className="small text-muted mt-4">Active account</p>
-          <code className="wallet-address">{connection.address}</code>
-          <p className="small text-muted mt-3">
-            {walletNetwork(connection.chainId)}
-          </p>
-          <BackendAuthControl />
+        <div className="stack-sm">
+          <KeyValue
+            items={[
+              {
+                label: "Account",
+                value: <Hash value={connection.address} label="Copy address" />,
+              },
+              { label: "Network", value: walletNetwork(connection.chainId) },
+              {
+                label: "Session",
+                value: auth.session ? "Signed in" : "Not signed in",
+              },
+            ]}
+          />
           {connection.chainId !== localChain.id && (
-            <div className="wallet-warning mt-4">
-              <p className="small mb-3">
-                Unsupported network. Contract reads are paused.
-              </p>
-              <SwitchNetworkButton />
-            </div>
+            <Notice tone="warning" title="Wrong network">
+              <p>TrustLayer reads and transactions are paused.</p>
+              <div className="mt-2">
+                <SwitchNetworkButton />
+              </div>
+            </Notice>
           )}
-          <Button
-            className="w-full mt-5"
-            variant="secondary"
-            disabled={disconnect.isPending}
-            onClick={async () => {
-              try {
-                await disconnect.mutateAsync({
-                  connector: connection.connector,
-                });
-                await queryClient.cancelQueries({ queryKey: ["trustlayer"] });
-                queryClient.removeQueries({ queryKey: ["trustlayer"] });
-                connect.reset();
-              } catch {
-                /* The mutation's error is rendered below. */
-              }
-            }}
-          >
-            Disconnect wallet
-          </Button>
-          <p className="small text-muted mt-3">
-            Disconnecting ends this app’s active connection. Wallet site
-            permissions may remain; manage them in your wallet.
+          <div className="button-row mt-2">
+            {auth.session && (
+              <Button
+                variant="secondary"
+                disabled={auth.busy}
+                onClick={async () => {
+                  await auth.logout();
+                  onClose();
+                  router.replace("/sign-in");
+                }}
+              >
+                Sign out
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              disabled={wallet.pending}
+              onClick={async () => {
+                setError("");
+                try {
+                  await wallet.run();
+                  onClose();
+                } catch (e) {
+                  setError(describeError(e).message);
+                }
+              }}
+            >
+              Disconnect wallet
+            </Button>
+          </div>
+          <p className="small text-muted">
+            Disconnecting ends this app’s connection; you will need to sign in
+            again. Site permissions may remain in your wallet.
           </p>
-        </>
+        </div>
       ) : (
-        <>
-          <p>
-            Connect MetaMask or a compatible injected EVM wallet to view your
-            local-chain account.
-          </p>
-          <p className="small text-muted mt-3">
-            Connection does not sign a message or send a transaction. Never
-            enter a private key or recovery phrase here.
-          </p>
-          {available === null ? (
-            <p className="small text-muted mt-5">Checking installed wallets…</p>
-          ) : available.length ? (
-            <div className="space-y-3 mt-5">
-              {available.map((connector) => (
-                <Button
-                  className="w-full"
-                  key={connector.uid}
-                  disabled={connect.isPending}
-                  onClick={() => connect.mutate({ connector })}
-                >
-                  {connect.isPending
-                    ? "Check your wallet…"
-                    : `Connect ${connector.name}`}
-                </Button>
-              ))}
-            </div>
-          ) : (
-            <div className="wallet-warning mt-5">
-              <h3>No injected wallet detected</h3>
-              <p className="small mt-2">
-                Install MetaMask or open this app in a browser with a compatible
-                EVM wallet, then refresh the page.
-              </p>
-            </div>
-          )}
-        </>
+        <p className="text-muted">
+          No wallet is connected. Return to the sign-in page to connect.
+        </p>
       )}
-      {(connect.error || disconnect.error) && (
+      {(error || auth.error) && (
         <p
           role="alert"
           aria-label="Wallet request error"
           className="form-error mt-4"
         >
-          {describeError(connect.error ?? disconnect.error).message}
+          {error || auth.error}
         </p>
       )}
     </Dialog>

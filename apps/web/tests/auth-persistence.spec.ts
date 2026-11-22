@@ -1,12 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { authBackend } from "../test-support/auth-backend";
-import {
-  accountB,
-  connectWallet,
-  installRpc,
-  installWallet,
-} from "./wallet-fixture";
+import { accountB, installRpc, installWallet } from "./wallet-fixture";
 
 test.describe("wallet and SIWE refresh persistence", () => {
   let backend: Awaited<ReturnType<typeof authBackend>>;
@@ -45,18 +40,26 @@ test.describe("wallet and SIWE refresh persistence", () => {
       await route.fulfill({ response });
     });
     await page.goto("/settings");
-    await connectWallet(page);
-    await page.keyboard.press("Escape");
-  }
-  async function login(page: Page) {
+    await expect(page).toHaveURL(/\/sign-in\?next=%2Fsettings/);
     await page
-      .getByRole("main")
-      .getByRole("button", { name: "Sign in with Ethereum" })
+      .getByRole("button", { name: "Connect wallet", exact: true })
       .click();
-    await expect(page.getByLabel("Backend display name")).toBeVisible();
+    await expect(signInButton(page)).toBeEnabled();
   }
-  const authenticated = (page: Page) =>
-    page.getByRole("main").getByText("Backend authenticated", { exact: true });
+  const signInButton = (page: Page) =>
+    page
+      .getByRole("main")
+      .getByRole("button", { name: "Sign in with Ethereum" });
+  async function login(page: Page) {
+    await signInButton(page).click();
+    await expect(page).toHaveURL(/\/settings$/);
+    await expect(page.getByLabel("Display name")).toBeVisible();
+  }
+  const authenticated = (page: Page) => page.getByLabel("Display name");
+  const onSignIn = async (page: Page) => {
+    await expect(page).toHaveURL(/\/sign-in/);
+    await expect(page.getByLabel("Display name")).toHaveCount(0);
+  };
 
   test("restores an authorized wallet after refresh without automatically signing", async ({
     page,
@@ -64,9 +67,7 @@ test.describe("wallet and SIWE refresh persistence", () => {
   }) => {
     await setup(page, baseURL!);
     await page.reload();
-    await expect(
-      page.getByRole("button", { name: "Manage wallet", exact: true }).first(),
-    ).toBeVisible();
+    await expect(signInButton(page)).toBeEnabled();
     expect(
       await page.evaluate(() =>
         window.__testWallet.calls.filter((m) =>
@@ -74,11 +75,6 @@ test.describe("wallet and SIWE refresh persistence", () => {
         ),
       ),
     ).toEqual([]);
-    await expect(
-      page
-        .getByRole("main")
-        .getByRole("button", { name: "Sign in with Ethereum" }),
-    ).toBeEnabled();
   });
   test("restores a database session, HttpOnly cookie and saved profile on refresh", async ({
     page,
@@ -86,10 +82,10 @@ test.describe("wallet and SIWE refresh persistence", () => {
   }) => {
     await setup(page, baseURL!);
     await login(page);
-    await page.getByLabel("Backend display name").fill("Persistent profile");
-    await page.getByRole("button", { name: "Save backend profile" }).click();
+    await page.getByLabel("Display name").fill("Persistent profile");
+    await page.getByRole("button", { name: "Save profile" }).click();
     await expect(
-      page.getByText("Backend profile saved.", { exact: true }),
+      page.getByText("Profile saved.", { exact: true }),
     ).toBeVisible();
     const cookie = (await page.context().cookies()).find(
       (c) => c.name === "tl_session",
@@ -103,8 +99,8 @@ test.describe("wallet and SIWE refresh persistence", () => {
       await page.evaluate(() => document.cookie.includes("tl_session=")),
     ).toBe(false);
     await page.reload();
-    await expect(authenticated(page)).toBeVisible();
-    await expect(page.getByLabel("Backend display name")).toHaveValue(
+    await expect(page).toHaveURL(/\/settings$/);
+    await expect(page.getByLabel("Display name")).toHaveValue(
       "Persistent profile",
     );
     expect(backend.logouts()).toBe(0);
@@ -122,19 +118,14 @@ test.describe("wallet and SIWE refresh persistence", () => {
     await login(page);
     const reads = backend.reads();
     await page.reload();
-    await expect(
-      page.getByRole("button", { name: "Restoring wallet", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText("Restoring your session…")).toBeVisible();
     await expect.poll(backend.reads).toBeGreaterThan(reads);
     expect(backend.logouts()).toBe(0);
-    await expect(page.getByLabel("Backend display name")).toHaveCount(0);
-    await expect(
-      page
-        .getByRole("main")
-        .getByText("Backend not authenticated", { exact: true }),
-    ).toHaveCount(0);
+    await expect(page.getByLabel("Display name")).toHaveCount(0);
+    await expect(page).toHaveURL(/\/settings$/);
     await page.evaluate(() => window.__testWallet.resumeReconnection());
     await expect(authenticated(page)).toBeVisible();
+    await expect(page).toHaveURL(/\/settings$/);
     expect(backend.logouts()).toBe(0);
   });
   test("expired database sessions show Sign In after a restored wallet", async ({
@@ -145,12 +136,8 @@ test.describe("wallet and SIWE refresh persistence", () => {
     await login(page);
     backend.expire();
     await page.reload();
-    await expect(
-      page
-        .getByRole("main")
-        .getByRole("button", { name: "Sign in with Ethereum" }),
-    ).toBeEnabled();
-    await expect(page.getByLabel("Backend display name")).toHaveCount(0);
+    await onSignIn(page);
+    await expect(signInButton(page)).toBeEnabled();
     expect(
       (await page.context().cookies()).some((c) => c.name === "tl_session"),
     ).toBe(false);
@@ -167,12 +154,8 @@ test.describe("wallet and SIWE refresh persistence", () => {
       accountB,
     );
     await page.reload();
-    await expect(
-      page
-        .getByRole("main")
-        .getByRole("button", { name: "Sign in with Ethereum" }),
-    ).toBeEnabled();
-    await expect(page.getByLabel("Backend display name")).toHaveCount(0);
+    await onSignIn(page);
+    await expect(signInButton(page)).toBeEnabled();
     await expect.poll(backend.logouts).toBeGreaterThan(0);
   });
   test("explicit backend logout survives refresh while the wallet reconnects", async ({
@@ -181,20 +164,20 @@ test.describe("wallet and SIWE refresh persistence", () => {
   }) => {
     await setup(page, baseURL!);
     await login(page);
-    await page.getByRole("button", { name: "Sign out of backend" }).click();
-    await expect(
-      page
-        .getByRole("main")
-        .getByRole("button", { name: "Sign in with Ethereum" }),
-    ).toBeEnabled();
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: "Sign out", exact: true })
+      .click();
+    await onSignIn(page);
+    await expect(signInButton(page)).toBeEnabled();
     await page.reload();
-    await expect(
-      page.getByRole("button", { name: "Manage wallet", exact: true }).first(),
-    ).toBeVisible();
-    await expect(page.getByLabel("Backend display name")).toHaveCount(0);
+    await expect(signInButton(page)).toBeEnabled();
+    await expect(page.getByLabel("Display name")).toHaveCount(0);
     expect(
       (await page.context().cookies()).some((c) => c.name === "tl_session"),
     ).toBe(false);
+    await page.goto("/settings");
+    await onSignIn(page);
   });
   test("a genuinely unavailable wallet on startup hides the profile without deleting a valid session", async ({
     page,
@@ -208,12 +191,10 @@ test.describe("wallet and SIWE refresh persistence", () => {
     const reads = backend.reads();
     await page.reload();
     await expect.poll(backend.reads).toBeGreaterThan(reads);
+    await onSignIn(page);
     await expect(
-      page
-        .getByRole("main")
-        .getByText("Backend not authenticated", { exact: true }),
+      page.getByRole("button", { name: "Connect wallet", exact: true }),
     ).toBeVisible();
-    await expect(page.getByLabel("Backend display name")).toHaveCount(0);
     expect(backend.logouts()).toBe(0);
     expect(
       (await page.context().cookies()).some((c) => c.name === "tl_session"),
@@ -226,19 +207,19 @@ test.describe("wallet and SIWE refresh persistence", () => {
     await setup(page, baseURL!);
     await login(page);
     await page
+      .getByRole("main")
       .getByRole("button", { name: "Manage wallet", exact: true })
-      .first()
       .click();
     await page
       .getByRole("button", { name: "Disconnect wallet", exact: true })
       .click();
-    await page.keyboard.press("Escape");
     await expect.poll(backend.logouts).toBeGreaterThan(0);
+    await onSignIn(page);
     await page.reload();
     await expect(
-      page.getByRole("button", { name: "Connect wallet", exact: true }).first(),
+      page.getByRole("button", { name: "Connect wallet", exact: true }),
     ).toBeVisible();
-    await expect(page.getByLabel("Backend display name")).toHaveCount(0);
+    await expect(page.getByLabel("Display name")).toHaveCount(0);
     expect(
       (await page.context().cookies()).some((c) => c.name === "tl_session"),
     ).toBe(false);
@@ -256,13 +237,14 @@ test.describe("wallet and SIWE refresh persistence", () => {
         .getByRole("main")
         .getByRole("alert", { name: "Backend authentication error" }),
     ).toBeVisible();
-    await expect(page.getByLabel("Backend display name")).toHaveCount(0);
+    await onSignIn(page);
     expect(
       (await page.context().cookies()).some((c) => c.name === "tl_session"),
     ).toBe(true);
     backend.fail(false);
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(authenticated(page)).toBeVisible();
+    await expect(page).toHaveURL(/\/settings$/);
     await expect(
       page
         .getByRole("main")
@@ -275,15 +257,12 @@ test.describe("wallet and SIWE refresh persistence", () => {
   }) => {
     await setup(page, baseURL!);
     backend.wrongOrigin();
-    await page
-      .getByRole("main")
-      .getByRole("button", { name: "Sign in with Ethereum" })
-      .click();
+    await signInButton(page).click();
     await expect(
       page
         .getByRole("main")
         .getByRole("alert", { name: "Backend authentication error" }),
     ).toContainText("origin");
-    await expect(page.getByLabel("Backend display name")).toHaveCount(0);
+    await onSignIn(page);
   });
 });

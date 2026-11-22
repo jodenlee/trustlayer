@@ -1,11 +1,12 @@
 "use client";
 import Link from "next/link";
+import { useState } from "react";
+import { ArrowLeft, RefreshCw } from "lucide-react";
 import { useCaseDetail } from "@/lib/blockchain/hooks/use-arbitration";
 import {
   caseActions,
   caseRole,
   caseStage,
-  remainingTime,
   settlementAllocation,
   VOTES,
 } from "@/lib/blockchain/arbitration";
@@ -15,13 +16,19 @@ import {
   MILESTONE_STATES,
   validEvidenceHash,
 } from "@/lib/blockchain/projects";
+import { timeUntil } from "@/lib/format";
 import {
   Button,
   Card,
+  CardBody,
   CardHeading,
+  Disclosure,
   EmptyState,
   Field,
+  Hash,
   Input,
+  KeyValue,
+  Notice,
   PageHeading,
   StatusBadge,
   TimelineItem,
@@ -30,20 +37,26 @@ import { ReviewedAction } from "./reviewed-action";
 import { Money } from "./money";
 import { ChainHistory } from "./chain-history";
 import { useWorkflowInput } from "./workflow-provider";
-import { useState } from "react";
 import { PrivateFiles, fileAssociationUrl } from "./private-files";
 import { backendRequest } from "@/lib/auth-client";
 import type { FileRecord } from "@/lib/files";
 import { deploymentScope } from "@/lib/blockchain/session";
-import { usePreview } from "./providers";
+import { useUi } from "./providers";
 
+const ZERO = /^0x0{64}$/i;
+const voteEffect = [
+  "",
+  "The milestone amount goes to the freelancer, minus the 1% service fee.",
+  "The full milestone amount is refunded to the client.",
+  "Half goes to the freelancer (minus the service fee) and half to the client.",
+];
 export function ChainDisputeDetail({ id }: { id: bigint }) {
   const read = useCaseDetail(id);
   const [attachment, setAttachment] = useState<{
     file: FileRecord;
     scope: string;
   }>();
-  const { toast } = usePreview();
+  const { toast } = useUi();
   const [response, setResponse] = useWorkflowInput(
     read.deployment.data?.manifest,
     read.deployment.address,
@@ -53,15 +66,16 @@ export function ChainDisputeDetail({ id }: { id: bigint }) {
   if (!view)
     return (
       <>
-        <PageHeading
-          title={`Dispute #${id}`}
-          description="Public contract state on the verified deployment."
-        />
+        <Link className="back-link" href="/disputes">
+          <ArrowLeft size={14} aria-hidden="true" />
+          Disputes
+        </Link>
+        <PageHeading title={`Dispute #${id}`} />
         <Card>
           <EmptyState
             title={
               !read.deployment.ready
-                ? "Verify your local connection"
+                ? "Waiting for the local network"
                 : read.error
                   ? "Dispute unavailable"
                   : "Loading dispute…"
@@ -69,7 +83,7 @@ export function ChainDisputeDetail({ id }: { id: bigint }) {
             description={
               read.error instanceof Error
                 ? read.error.message
-                : "Connect a wallet on Hardhat Local and verify the deployment. No sample data is used."
+                : "The case loads once your wallet and the contracts are verified."
             }
             action={
               <Button variant="secondary" onClick={() => void read.refetch()}>
@@ -95,174 +109,161 @@ export function ChainDisputeDetail({ id }: { id: bigint }) {
     projectId: d.projectId,
     milestoneIndex: Number(d.milestoneIndex),
   };
+  const manifest = read.deployment.data!.manifest;
+  const canSeeFiles = ["Client", "Freelancer", "Juror"].includes(role);
+  const files = (category: "response" | "evidence") =>
+    canSeeFiles ? (
+      <PrivateFiles
+        key={`${deploymentScope(manifest)}:${account}:${id}`}
+        manifest={manifest}
+        projectId={d.projectId}
+        index={Number(d.milestoneIndex)}
+        disputeId={id}
+        category={category}
+        canUpload={
+          role !== "Juror" && d.status === 1 && view.now < d.responseDeadline
+        }
+        onSelected={
+          category === "response"
+            ? (file) => {
+                setResponse(file.content_hash);
+                setAttachment({ file, scope: deploymentScope(manifest) });
+              }
+            : undefined
+        }
+      />
+    ) : null;
+
+  const stageCopy = {
+    "Response window": {
+      title: "Waiting for a response",
+      text: `The other party can respond until ${chainDate(d.responseDeadline)} (${timeUntil(d.responseDeadline, view.now)}). Juror voting starts after that.`,
+    },
+    "Voting open": {
+      title: "Jurors are voting",
+      text: `Voting closes ${chainDate(d.votingDeadline)} (${timeUntil(d.votingDeadline, view.now)}). Two matching votes decide the outcome; without a majority, funds split 50/50.`,
+    },
+    "Ready to finalize": {
+      title: "Voting has closed",
+      text: "Anyone can now finalize the case. The contract computes the outcome and settles the milestone exactly once.",
+    },
+    Finalized: {
+      title: d.fallbackApplied ? "50/50 fallback" : VOTES[d.ruling],
+      text: `Finalized ${chainDate(d.finalizedAt)}. The outcome was computed by the contract from the jurors’ votes.`,
+    },
+  }[stage];
+
   return (
     <>
-      {!read.deployment.ready && (
-        <p role="status" className="small text-muted">
-          Rechecking the deployment. Showing the last verified case; transaction
-          actions are paused.
-        </p>
-      )}
       <Link className="back-link" href="/disputes">
-        All disputes
+        <ArrowLeft size={14} aria-hidden="true" />
+        Disputes
       </Link>
       <PageHeading
-        eyebrow="ON-CHAIN ARBITRATION"
+        eyebrow={
+          <>
+            <StatusBadge status={stage} />
+            <span className="chip">
+              {role === "Viewer"
+                ? "Viewing only"
+                : `You’re the ${role.toLowerCase()}`}
+            </span>
+          </>
+        }
         title={`Dispute #${id}`}
-        description={`Acting as ${role} · Project #${d.projectId} · Milestone index ${d.milestoneIndex}`}
-        action={<StatusBadge status={stage} />}
+        description={
+          <>
+            Milestone {Number(d.milestoneIndex) + 1} of{" "}
+            <Link className="text-link" href={`/projects/${d.projectId}`}>
+              Project #{d.projectId.toString()}
+            </Link>{" "}
+            · <Money amount={d.milestoneAmount} />{" "}
+            {d.status === 2 ? "settled" : "frozen"}
+          </>
+        }
       />
-      <div className="detail-grid">
-        <div className="space-y-5 order-2 lg:order-1">
-          <Card>
-            <CardHeading
-              title="Case overview"
-              action={
-                <Link className="text-link" href={`/projects/${d.projectId}`}>
-                  View project
-                </Link>
-              }
-            />
-            <div className="card-body pt-0!">
-              <dl className="summary-list">
+      {!read.deployment.ready && (
+        <p role="status" className="small text-muted mb-4">
+          Rechecking the network. Showing the last verified case; actions are
+          paused.
+        </p>
+      )}
+      <div className="grid-main">
+        <div className="stack">
+          <section
+            className={`next-step ${d.status === 2 ? "neutral" : stage === "Ready to finalize" ? "warning" : ""}`}
+            aria-label="Case status"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <span className="eyebrow-label">
+                {d.status === 2 ? "OUTCOME" : "CURRENT STAGE"}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={read.isFetching}
+                onClick={() => void read.refetch()}
+              >
+                <RefreshCw size={13} aria-hidden="true" />
+                Refresh case
+              </Button>
+            </div>
+            <h2>{stageCopy.title}</h2>
+            <p>{stageCopy.text}</p>
+            {d.status === 2 && (
+              <dl
+                className="breakdown"
+                data-testid="case-settlement"
+                aria-label="Settlement"
+              >
                 <div>
-                  <dt>Disputed milestone</dt>
+                  <dt>Freelancer gross ({d.freelancerBps / 100}%)</dt>
                   <dd>
-                    <Money amount={d.milestoneAmount} />
+                    <Money amount={allocation.freelancerGross} />
                   </dd>
                 </div>
                 <div>
-                  <dt>Milestone state</dt>
-                  <dd>{MILESTONE_STATES[view.milestoneState]}</dd>
-                </div>
-                <div>
-                  <dt>Case collateral</dt>
+                  <dt>Service fee (1% of freelancer gross)</dt>
                   <dd>
-                    {view.assignment.state === 2
-                      ? "Unlocked for this case"
-                      : view.assignment.state === 1
-                        ? "100 mUSD locked per assigned juror"
-                        : "Assignment unavailable"}
+                    <Money amount={allocation.serviceFee} />
                   </dd>
                 </div>
                 <div>
-                  <dt>Latest chain time</dt>
-                  <dd>{chainDate(view.now)}</dd>
+                  <dt>Client refund</dt>
+                  <dd>
+                    <Money amount={allocation.clientRefund} />
+                  </dd>
+                </div>
+                <div>
+                  <dt>Freelancer net</dt>
+                  <dd>
+                    <Money amount={allocation.freelancerNet} />
+                  </dd>
                 </div>
               </dl>
-              {d.status === 2 ? (
-                <div className="mt-5" data-testid="case-settlement">
-                  <h3>
-                    {d.fallbackApplied ? "50/50 fallback" : VOTES[d.ruling]}
-                  </h3>
-                  <p className="small text-muted">
-                    Finalized on-chain {chainDate(d.finalizedAt)}. Stored
-                    freelancer allocation: {d.freelancerBps} bps. The frontend
-                    does not choose the ruling.
-                  </p>
-                  <dl className="summary-list">
-                    <div>
-                      <dt>Freelancer gross</dt>
-                      <dd>
-                        <Money amount={allocation.freelancerGross} />
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Service fee (1% of freelancer gross)</dt>
-                      <dd>
-                        <Money amount={allocation.serviceFee} />
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Freelancer net</dt>
-                      <dd>
-                        <Money amount={allocation.freelancerNet} />
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Client refund</dt>
-                      <dd>
-                        <Money amount={allocation.clientRefund} />
-                      </dd>
-                    </div>
-                  </dl>
-                </div>
-              ) : (
-                <p className="small text-muted mt-4">
-                  Milestone principal remains in escrow, frozen for arbitration.
-                  Finalization uses the contract’s two-vote majority or 50/50
-                  fallback. No final ruling is displayed before on-chain
-                  finalization.
+            )}
+            {allowed.respond && (
+              <div className="action-box" aria-label="Your response">
+                <h3>Your response</h3>
+                <p className="small text-muted">
+                  You can record one response before the deadline. Upload your
+                  evidence privately; its fingerprint is recorded on-chain.
                 </p>
-              )}
-            </div>
-          </Card>
-          <Card>
-            <CardHeading
-              title="Evidence references"
-              description="Public on-chain hashes and separately authorized private attachments."
-            />
-            <div className="card-body pt-0! space-y-3">
-              <p className="small text-muted">Opening hash</p>
-              <code className="wallet-address">{d.evidenceHash}</code>
-              <p className="small text-muted">Counterparty response hash</p>
-              <code className="wallet-address">
-                {/^0x0{64}$/i.test(d.responseHash)
-                  ? "No response recorded"
-                  : d.responseHash}
-              </code>
-              <p className="small text-muted">
-                A hash alone does not make the referenced evidence available or
-                private. Do not enter confidential deliverables or personal
-                information.
-              </p>
-              {["Client", "Freelancer", "Juror"].includes(role) && (
-                <PrivateFiles
-                  key={`${deploymentScope(read.deployment.data!.manifest)}:${account}:${id}`}
-                  manifest={read.deployment.data!.manifest}
-                  projectId={d.projectId}
-                  index={Number(d.milestoneIndex)}
-                  disputeId={id}
-                  category={allowed.respond ? "response" : "evidence"}
-                  canUpload={
-                    role !== "Juror" &&
-                    d.status === 1 &&
-                    view.now < d.responseDeadline
-                  }
-                  onSelected={
-                    allowed.respond
-                      ? (file) => {
-                          setResponse(file.content_hash);
-                          setAttachment({
-                            file,
-                            scope: deploymentScope(
-                              read.deployment.data!.manifest,
-                            ),
-                          });
-                        }
-                      : undefined
-                  }
-                />
-              )}
-              <p className="small text-muted">
-                Additional off-chain evidence is append-only until the response
-                deadline. Assigned jurors and participants retain read access
-                after closure. Only the opening and single response hashes are
-                recorded by the contract.
-              </p>
-              {allowed.respond && (
-                <>
-                  <Field
+                {files("response")}
+                <Field
+                  id="response-hash"
+                  label="Response evidence hash"
+                  hint="Filled in automatically after a private upload."
+                >
+                  <Input
                     id="response-hash"
-                    label="Response evidence hash"
-                    hint="Only the non-opening participant may record one nonzero bytes32 hash before the response deadline."
-                  >
-                    <Input
-                      id="response-hash"
-                      value={response}
-                      onChange={(e) => setResponse(e.target.value.trim())}
-                    />
-                  </Field>
+                    spellCheck={false}
+                    value={response}
+                    placeholder="0x followed by 64 hexadecimal characters"
+                    onChange={(e) => setResponse(e.target.value.trim())}
+                  />
+                </Field>
+                <div className="button-row">
                   <ReviewedAction
                     title="Record response hash"
                     closeAfterConfirmed={false}
@@ -305,65 +306,24 @@ export function ChainDisputeDetail({ id }: { id: bigint }) {
                     }}
                   >
                     <p>
-                      Record this public reference once. This does not upload
-                      files, extend deadlines or change the jury.
+                      Record this response fingerprint once. This doesn’t upload
+                      files, extend deadlines or change the jurors.
                     </p>
-                    <code className="wallet-address">{response}</code>
+                    <p className="mt-2 small">
+                      <Hash value={response} />
+                    </p>
                   </ReviewedAction>
-                </>
-              )}
-            </div>
-          </Card>
-          <Card>
-            <CardHeading
-              title="Assigned jurors"
-              description="Three distinct jurors, selected by deterministic rotation. Votes are public and immutable."
-            />
-            <div className="card-body pt-0! space-y-4">
-              {d.jurors.map((juror, index) => (
-                <div key={juror}>
-                  <code className="wallet-address">{juror}</code>
-                  <p className="small text-muted">
-                    {VOTES[view.ballots[index]]} ·{" "}
-                    {view.assignment.state === 2
-                      ? "This case’s 100 mUSD lock released"
-                      : "100 mUSD reserved for this case"}
-                  </p>
                 </div>
-              ))}
-            </div>
-          </Card>
-          <Card>
-            <CardHeading title="Participants & fee payer" />
-            <div className="card-body pt-0! space-y-3">
-              <p className="small">Client</p>
-              <code className="wallet-address">{d.client}</code>
-              <p className="small">Freelancer</p>
-              <code className="wallet-address">{d.freelancer}</code>
-              <p className="small">Opener · paid 15 mUSD</p>
-              <code className="wallet-address">{d.opener}</code>
-              <p className="small">Acting wallet · {role}</p>
-              <code className="wallet-address">{account}</code>
-            </div>
-          </Card>
-        </div>
-        <div className="space-y-5 order-1 lg:order-2">
-          <Card>
-            <CardHeading
-              title="Case actions"
-              description="All permissions and deadlines are checked again before signing."
-            />
-            <div className="card-body pt-0! space-y-4">
-              {role === "Juror" && (
-                <>
-                  <p>Your recorded vote: {VOTES[view.vote]}</p>
-                  <p className="small text-muted">
-                    Voting is public. Once confirmed, your ballot cannot be
-                    changed.
-                  </p>
+              </div>
+            )}
+            {role === "Juror" && d.status !== 2 && (
+              <div className="action-box" aria-label="Your vote">
+                <h3>Your recorded vote: {VOTES[view.vote]}</h3>
+                <div className="vote-options">
                   {[1, 2, 3].map((vote) => (
                     <ReviewedAction
                       key={vote}
+                      variant="secondary"
                       title={`Vote: ${VOTES[vote]}`}
                       details={details}
                       disabled={!allowed.vote || read.isFetching}
@@ -372,30 +332,27 @@ export function ChainDisputeDetail({ id }: { id: bigint }) {
                       }
                     >
                       <p>
-                        {VOTES[vote]}:{" "}
-                        {vote === 1
-                          ? "100% gross allocation to the freelancer, less the 1% service fee."
-                          : vote === 2
-                            ? "100% of milestone principal returned to the client."
-                            : "50% gross to the freelancer (less the service fee) and 50% to the client."}{" "}
-                        Your vote is public and permanent. Two matching votes
-                        determine the ruling; finalization still waits until
-                        voting ends.
+                        <strong>{VOTES[vote]}.</strong> {voteEffect[vote]} Your
+                        vote is public and can’t be changed. Two matching votes
+                        decide the ruling; the case is finalized after voting
+                        closes.
                       </p>
                     </ReviewedAction>
                   ))}
-                  {!allowed.vote && (
-                    <p className="small text-muted">
-                      {view.vote !== 0
-                        ? "You have already voted."
-                        : stage === "Response window"
-                          ? "Voting is disabled until the response deadline."
-                          : "Voting is closed for this case."}
-                    </p>
-                  )}
-                </>
-              )}
-              {allowed.finalize && (
+                </div>
+                <p className="small text-muted">
+                  {allowed.vote
+                    ? "Votes are public and permanent once confirmed."
+                    : view.vote !== 0
+                      ? "You have already voted."
+                      : stage === "Response window"
+                        ? "Voting opens when the response deadline is reached."
+                        : "Voting is closed for this case."}
+                </p>
+              </div>
+            )}
+            {allowed.finalize && (
+              <div className="button-row">
                 <ReviewedAction
                   title="Finalize dispute"
                   details={details}
@@ -405,30 +362,32 @@ export function ChainDisputeDetail({ id }: { id: bigint }) {
                   }
                 >
                   <p>
-                    Anyone may finalize now. The contract computes the ruling,
-                    settles the disputed milestone once, releases all three case
-                    locks and reserves juror rewards. This transaction supplies
-                    no chosen verdict.
+                    The contract computes the ruling from the recorded votes,
+                    settles the disputed milestone once, releases the jurors’
+                    locked stake and reserves their rewards. You don’t choose
+                    the outcome.
                   </p>
                 </ReviewedAction>
-              )}
-              {d.status !== 2 && !allowed.finalize && (
+              </div>
+            )}
+            {d.status !== 2 && !allowed.finalize && (
+              <p className="small text-muted">
+                Finalization becomes available to anyone strictly after the
+                voting deadline, even if jurors abstain.
+              </p>
+            )}
+            {role === "Juror" && d.status === 2 && (
+              <div className="action-box" aria-label="Juror reward">
+                <h3>
+                  Claimable reward: <Money amount={view.claimable} />
+                </h3>
                 <p className="small text-muted">
-                  Permissionless finalization becomes available strictly after
-                  the voting deadline, including if jurors abstain.
+                  {view.claimed
+                    ? "Your 4 mUSD reward was claimed for this case."
+                    : "Every assigned juror, including those who didn’t vote, can claim 4 mUSD once."}
                 </p>
-              )}
-              {role === "Juror" && (
-                <>
-                  <p>
-                    Claimable reward: <Money amount={view.claimable} />
-                  </p>
-                  <p className="small text-muted">
-                    {view.claimed
-                      ? "Your 4 mUSD reward was claimed for this case."
-                      : "Each assigned juror, including abstainers, may claim 4 mUSD after finalization. Reward reserves stay separate from stake and escrow."}
-                  </p>
-                  {allowed.claim && (
+                {allowed.claim && (
+                  <div className="button-row">
                     <ReviewedAction
                       title="Claim 4 mUSD reward"
                       details={{ ...details, amount: view.claimable }}
@@ -438,109 +397,177 @@ export function ChainDisputeDetail({ id }: { id: bigint }) {
                       }
                     >
                       <p>
-                        Claim this case’s fixed reward to your own wallet
-                        exactly once through arbitration. No frontend token
-                        transfer or beneficiary override is used.
+                        Claim this case’s fixed juror reward to your own wallet.
+                        It can only be claimed once.
                       </p>
                     </ReviewedAction>
-                  )}
-                </>
-              )}
-              {role === "Viewer" && (
-                <p className="small text-muted">
-                  This wallet is neither participant nor assigned juror. It may
-                  finalize after the deadline, but cannot respond, vote or claim
-                  rewards.
-                </p>
-              )}
-              <Button
-                variant="ghost"
-                disabled={read.isFetching}
-                onClick={() => void read.refetch()}
-              >
-                Refresh case
-              </Button>
-            </div>
-          </Card>
-          <Card>
+                  </div>
+                )}
+              </div>
+            )}
+            {role === "Viewer" && (
+              <p className="small text-muted">
+                You’re not a party or juror in this case. You can finalize it
+                after the voting deadline, but can’t respond, vote or claim
+                rewards.
+              </p>
+            )}
+          </section>
+          <Card label="Evidence">
             <CardHeading
-              title="Arbitration timeline"
-              description={remainingTime(
-                stage === "Response window"
-                  ? d.responseDeadline
-                  : d.votingDeadline,
-                view.now,
-              )}
+              title="Evidence"
+              description="Only the opening and response fingerprints are recorded on-chain. Files stay private to the parties and assigned jurors."
             />
-            <ul className="timeline">
-              <TimelineItem
-                title="Opened"
-                detail={chainDate(d.openedAt)}
-                state="done"
-              />
-              <TimelineItem
-                title="12-hour response deadline"
-                detail={chainDate(d.responseDeadline)}
-                state={stage === "Response window" ? "current" : "done"}
-              />
-              <TimelineItem
-                title="24-hour voting deadline"
-                detail={chainDate(d.votingDeadline)}
-                state={
-                  stage === "Voting open"
-                    ? "current"
-                    : d.status === 2 || stage === "Ready to finalize"
-                      ? "done"
-                      : "upcoming"
-                }
-              />
-              <TimelineItem
-                title="Permissionless finalization"
-                detail={
-                  d.status === 2
-                    ? chainDate(d.finalizedAt)
-                    : "Strictly after voting closes"
-                }
-                state={
-                  d.status === 2
-                    ? "done"
-                    : stage === "Ready to finalize"
-                      ? "current"
-                      : "upcoming"
-                }
-              />
-            </ul>
-            <div className="card-body card-divider small text-muted">
-              Responses require time before the first deadline. Voting includes
-              both boundary timestamps. Only chain time controls these actions.
-            </div>
+            <CardBody>
+              <div className="address-line">
+                <span className="label">Opening evidence</span>
+                <Hash value={d.evidenceHash} />
+              </div>
+              <div className="address-line">
+                <span className="label">Response</span>
+                {ZERO.test(d.responseHash) ? (
+                  <span className="small text-muted">No response recorded</span>
+                ) : (
+                  <Hash value={d.responseHash} />
+                )}
+              </div>
+              {!allowed.respond && canSeeFiles && (
+                <div className="mt-3">{files("evidence")}</div>
+              )}
+              <p className="small text-faint mt-3">
+                Parties can add supplementary files until the response deadline.
+                Those files are kept off-chain and remain readable by the
+                parties and assigned jurors after the case closes.
+              </p>
+            </CardBody>
           </Card>
-          <Card>
-            <CardHeading title="Protocol fee accounting" />
-            <div className="card-body pt-0! small text-muted space-y-3">
-              <p>
-                This case’s 3 mUSD treasury fee:{" "}
-                {view.feeReceived ? "Received on-chain" : "Not received"}.
-              </p>
-              <p>
-                All-project cumulative service fees:{" "}
-                <Money amount={view.treasuryServiceFees} />
-              </p>
-              <p>
-                All-case cumulative dispute fees:{" "}
-                <Money amount={view.treasuryDisputeFees} />
-              </p>
-              <p>
-                The 12 mUSD juror reward reserve stays in arbitration.
-                Finalization releases collateral; it does not withdraw a juror’s
-                deposited stake.
-              </p>
-            </div>
+          <Card label="Jurors">
+            <CardHeading
+              title="Jurors"
+              description="Three jurors assigned by deterministic rotation. Votes are public."
+            />
+            <CardBody className="pt-1!">
+              {d.jurors.map((juror, index) => (
+                <div className="address-line" key={juror}>
+                  <span className="label">
+                    {VOTES[view.ballots[index]]}
+                    {juror.toLowerCase() === account.toLowerCase() && " (you)"}
+                  </span>
+                  <Hash value={juror} label="Copy juror address" />
+                </div>
+              ))}
+            </CardBody>
           </Card>
+          <ChainHistory projectIds={[d.projectId]} detail disputeIds={[id]} />
         </div>
-      </div>
-      <div className="mt-6">
-        <ChainHistory projectIds={[d.projectId]} detail disputeIds={[id]} />
+        <aside className="stack" aria-label="Case summary">
+          <Card label="Timeline">
+            <CardHeading title="Timeline" />
+            <CardBody>
+              <ol className="steps">
+                <TimelineItem
+                  title="Dispute opened"
+                  detail={chainDate(d.openedAt)}
+                  state="done"
+                />
+                <TimelineItem
+                  title="Response deadline (12 hours)"
+                  detail={chainDate(d.responseDeadline)}
+                  state={stage === "Response window" ? "current" : "done"}
+                />
+                <TimelineItem
+                  title="Voting deadline (24 hours)"
+                  detail={chainDate(d.votingDeadline)}
+                  state={
+                    stage === "Voting open"
+                      ? "current"
+                      : d.status === 2 || stage === "Ready to finalize"
+                        ? "done"
+                        : "upcoming"
+                  }
+                />
+                <TimelineItem
+                  title="Finalized"
+                  detail={
+                    d.status === 2
+                      ? chainDate(d.finalizedAt)
+                      : "Strictly after voting closes"
+                  }
+                  state={
+                    d.status === 2
+                      ? "done"
+                      : stage === "Ready to finalize"
+                        ? "current"
+                        : "upcoming"
+                  }
+                />
+              </ol>
+            </CardBody>
+          </Card>
+          <Card label="Parties">
+            <CardHeading title="Parties" />
+            <CardBody className="pt-1!">
+              {(
+                [
+                  ["Client", d.client],
+                  ["Freelancer", d.freelancer],
+                  ["Opened by (paid 15 mUSD)", d.opener],
+                ] as const
+              ).map(([label, address]) => (
+                <div className="address-line" key={label}>
+                  <span className="label">
+                    {label}
+                    {address.toLowerCase() === account.toLowerCase() &&
+                      " (you)"}
+                  </span>
+                  <Hash value={address} label={`Copy ${label} address`} />
+                </div>
+              ))}
+            </CardBody>
+          </Card>
+          <Disclosure summary="Technical details">
+            <KeyValue
+              stacked
+              items={[
+                {
+                  label: "Milestone state",
+                  value: MILESTONE_STATES[view.milestoneState],
+                },
+                {
+                  label: "Juror collateral",
+                  value:
+                    view.assignment.state === 2
+                      ? "Unlocked for this case"
+                      : view.assignment.state === 1
+                        ? "100 mUSD locked per assigned juror"
+                        : "Assignment unavailable",
+                },
+                {
+                  label: "Treasury fee (3 mUSD)",
+                  value: view.feeReceived
+                    ? "Received on-chain"
+                    : "Not received yet",
+                },
+                {
+                  label: "Total service fees (all projects)",
+                  value: <Money amount={view.treasuryServiceFees} />,
+                },
+                {
+                  label: "Total dispute fees (all cases)",
+                  value: <Money amount={view.treasuryDisputeFees} />,
+                },
+                { label: "Latest chain time", value: chainDate(view.now) },
+              ]}
+            />
+            <Notice tone="neutral" className="mt-3">
+              <p>
+                Deadlines use blockchain time. Responses must arrive before the
+                response deadline; votes are accepted from that deadline until
+                the voting deadline inclusive.
+              </p>
+            </Notice>
+          </Disclosure>
+        </aside>
       </div>
     </>
   );

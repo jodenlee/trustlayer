@@ -1,3 +1,3 @@
-import { Transactions } from "@/components/transactions";
+import { WalletTransactions } from "@/components/chain-history";
 export const metadata = { title: "Transactions" };
-export default Transactions;
+export default WalletTransactions;

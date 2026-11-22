@@ -177,7 +177,9 @@ export function createTransactionController<Context>(
           errorKind: failure.kind,
           replacementReason,
           message: hash
-            ? "Transaction was submitted, but confirmation could not be established. Check its receipt before retrying; do not assume failure."
+            ? failure.kind === "nonce"
+              ? failure.message
+              : "Transaction was submitted, but confirmation could not be established. Check its receipt before retrying; do not assume failure."
             : failure.message,
         });
       } finally {

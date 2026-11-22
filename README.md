@@ -2,7 +2,44 @@
 
 **Decentralized Freelance Escrow and Dispute Resolution Protocol**
 
-Implemented today: milestone escrow, juror staking/selection, on-chain arbitration, protocol treasury and fixed juror rewards; wallet/SIWE profiles; PostgreSQL project metadata; and private, receipt-bound Supabase attachments. **Phase 5** adds an approved optional Anvil local backend with verified disk backup/restore, unique chain binding, stable deployment exports, explicit ETH/mUSD provisioning and integration hardening. Connected views show actual chain state; sample views remain labeled previews. See [Phase 5 operations and verification](docs/PHASE5.md). This protocol is not audited or ready for handling real funds.
+Implemented today: milestone escrow, juror staking/selection, on-chain arbitration, protocol treasury and fixed juror rewards; wallet/SIWE profiles; PostgreSQL project metadata; and private, receipt-bound Supabase attachments. **Phase 5** adds an approved optional Anvil local backend with verified disk backup/restore, unique chain binding, stable deployment exports, explicit ETH/mUSD provisioning and integration hardening. The redesigned app requires wallet sign-in (SIWE) and shows only real chain and database state. See [Phase 5 operations](docs/PHASE5.md) and the [UI redesign and startup handover](docs/UI_REDESIGN_HANDOVER.md). This protocol is not audited or ready for handling real funds.
+
+## Getting started (Windows PowerShell)
+
+TrustLayer runs on a local Anvil blockchain that is saved to disk between sessions. Use `npm.cmd`/`npx.cmd` in PowerShell.
+
+**Every day, after reopening VS Code** — open a terminal in the repository root and run:
+
+```powershell
+npm.cmd run dev
+```
+
+It restores the newest saved chain backup (or reuses a chain still running after a crash), verifies the chain identity, contracts and manifest, checks saved project data against the chain (read-only), publishes the deployment to the app, starts Next.js and prints the URL (default http://127.0.0.1:3000). Open it in Chrome, connect MetaMask on the local network (chain 31337) and sign in. It never creates a new chain, redeploys, or overwrites a backup; if anything is ambiguous it stops and tells you what to do.
+
+**To stop** — press **Ctrl+C** in that terminal (if Windows asks "Terminate batch job (Y/N)?" after the backup message, answer Y), or from any other terminal:
+
+```powershell
+npm.cmd run dev:stop
+```
+
+Both stop the app, wait for pending transactions, save and verify a backup, and stop only processes TrustLayer started. `npm.cmd run dev:status` shows what is running and which backup would be restored.
+
+**After a crash or closing VS Code abruptly** — just run `npm.cmd run dev` again. A still-running chain is reused (no state lost); otherwise the latest checkpoint (saved every minute while the chain changes) is restored. If a previous session left processes behind, `npm.cmd run dev:stop` backs them up and stops them.
+
+**MetaMask transaction stuck "Pending"?** Don't resubmit. Run `npm.cmd run dev:status`; if it reports queued transactions, follow [docs/TRANSACTION_RELIABILITY.md](docs/TRANSACTION_RELIABILITY.md#4-safe-recovery-procedure-metamask-stale-nonce) (usually MetaMask remembers nonces from an earlier local chain).
+
+**First-time setup on a new machine/clone** (creates a new, empty chain):
+
+```powershell
+npm.cmd ci
+npm.cmd --prefix apps/web ci
+npm.cmd run compile
+# create apps/web/.env.local from apps/web/.env.example (DATABASE_URL, AUTH_ORIGIN, Supabase keys)
+npm.cmd run dev:init -- --name dev1
+npm.cmd run dev
+```
+
+`dev:init` refuses to run if a deployment manifest already exists unless you add `--archive-current` (which archives it under `.local-chain/archive/`). Set `TRUSTLAYER_CLIENT`, `TRUSTLAYER_FREELANCER` and `TRUSTLAYER_JUROR_1..3` beforehand to fund development wallets (see [Phase 5](docs/PHASE5.md#7-explicit-wallet-provisioning)). Details, recovery and safety rules: [docs/UI_REDESIGN_HANDOVER.md](docs/UI_REDESIGN_HANDOVER.md).
 
 ## Requirements
 
@@ -10,7 +47,7 @@ Implemented today: milestone escrow, juror staking/selection, on-chain arbitrati
 - npm, Git and VS Code
 - MetaMask for the later browser demo
 
-## Quick start (VS Code / PowerShell)
+## Contract development (VS Code / PowerShell)
 
 ```powershell
 npm ci
@@ -123,14 +160,14 @@ TrustLayer is maintained by one developer with Codex assistance. Follow `AGENTS.
 
 Smart-contract verification remains available independently. Phase 3A supplies the interface foundation, Phase 3B adds wallet/deployment verification, Phase 3C integrates escrow and Phase 3D integrates arbitration/staking/rewards. Phase 4A adds PostgreSQL metadata and wallet authentication. Phase 4B integrates persistent project text and private deliverables/case files. Phase 5 adds approved local recovery and integration hardening; stop after Phase 5 for review.
 
-## Frontend through Phase 3D
+## Frontend
 
 ```powershell
 npm.cmd --prefix apps/web ci
 npm.cmd run web:dev
 ```
 
-Open http://127.0.0.1:3000. Navigation/sample views work without a blockchain node or wallet. Preview content is explicitly fictional. Connected, verified wallets use real dashboard/project/dispute/juror/history views and explicitly review protocol transactions. Phase 4B synchronizes descriptive metadata after confirmation when signed in; unsaved drafts remain memory-only. Approval is separate from escrow funding, fee payment or stake deposit. Votes and evidence hashes are public; file bytes stay in private Storage behind authenticated APIs.
+For daily use prefer `npm.cmd run dev` (above). Every application page requires a connected wallet and a SIWE session; visitors are sent to `/sign-in` first. There are no fictional preview views. Verified wallets use real overview/project/dispute/jury/history views and explicitly review protocol transactions. Phase 4B synchronizes descriptive metadata after confirmation when signed in; unsaved drafts remain memory-only. Approval is separate from escrow funding, fee payment or stake deposit. Votes and evidence hashes are public; file bytes stay in private Storage behind authenticated APIs.
 
 For live workflows, start a persistent node on http://127.0.0.1:8545, deploy Phase2D, and export with `TRUSTLAYER_EXPORT_EPHEMERAL=false` using the exact [Phase 3C setup and controlled token-provisioning commands](docs/PHASE3C.md). The checked-in ephemeral verification manifest is intentionally rejected. Dev/build syncs the generated export to ignored public frontend metadata; after re-exporting while the app runs, use `npm.cmd --prefix apps/web run contracts:sync` and Retry verification. No addresses or ABIs are manually copied into page components.
 

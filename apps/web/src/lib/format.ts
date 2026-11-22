@@ -35,3 +35,17 @@ export function deadlineLabel(value: string): string {
     }).format(new Date(value)) + " UTC"
   );
 }
+/**
+ * Human-readable distance between a chain deadline and the latest chain time
+ * (both Unix seconds). Uses chain time, never the browser clock.
+ */
+export function timeUntil(deadline: bigint, now: bigint): string {
+  if (deadline <= now) return "deadline passed";
+  const seconds = deadline - now;
+  const days = seconds / 86400n;
+  const hours = (seconds % 86400n) / 3600n;
+  const minutes = (seconds % 3600n) / 60n;
+  if (days > 0n) return `${days}d ${hours}h left`;
+  if (hours > 0n) return `${hours}h ${minutes}m left`;
+  return minutes > 0n ? `${minutes}m left` : "under a minute left";
+}

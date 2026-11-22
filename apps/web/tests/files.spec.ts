@@ -10,7 +10,8 @@ import {
 import { randomUUID } from "node:crypto";
 import { FileService } from "../src/lib/server/file-service";
 import { sha256 } from "../src/lib/server/storage";
-import { accountB, connectWallet, installWallet } from "./wallet-fixture";
+import { accountB, installWallet } from "./wallet-fixture";
+import { completeSignIn } from "./auth-fixture";
 
 test.describe("persistent metadata and private attachments", () => {
   let backend: Awaited<ReturnType<typeof filesBackend>>,
@@ -67,17 +68,29 @@ test.describe("persistent metadata and private attachments", () => {
       await route.fulfill({ response });
     });
     await page.goto("/settings");
-    await connectWallet(page);
-    await page.keyboard.press("Escape");
+    await expect(page).toHaveURL(/\/sign-in\?next=%2Fsettings/);
+    await page
+      .getByRole("button", { name: "Connect wallet", exact: true })
+      .click();
     await page
       .getByRole("main")
       .getByRole("button", { name: "Sign in with Ethereum" })
       .click();
-    await expect(page.getByLabel("Backend display name")).toBeVisible();
+    await expect(page.getByLabel("Display name")).toBeVisible();
     return caseState;
   }
+  /** Project details editing lives in a collapsed sidebar section. */
+  async function editDetails(page: Page) {
+    const title = page.getByLabel("Saved project title");
+    if (!(await title.isVisible()))
+      await page
+        .locator("summary", { hasText: "Edit project details" })
+        .click();
+    await expect(title).toBeVisible();
+    return title;
+  }
   async function save(page: Page, title = "Persistent project") {
-    await page.getByLabel("Saved project title").fill(title);
+    await (await editDetails(page)).fill(title);
     await page
       .getByLabel("Saved project description")
       .fill("Private persistent scope");
@@ -99,7 +112,7 @@ test.describe("persistent metadata and private attachments", () => {
     await page.clock.install();
     await setup(page, baseURL!, "worker");
     await page.goto("/projects/0");
-    const title = page.getByLabel("Saved project title");
+    const title = await editDetails(page);
     await title.fill("Unsaved Phase 5 draft");
     const input = page.getByLabel("Select deliverable file");
     await input.setInputFiles({
@@ -159,6 +172,7 @@ test.describe("persistent metadata and private attachments", () => {
     await expect(
       page.getByRole("heading", { name: "Persistent project", exact: true }),
     ).toBeVisible();
+    await editDetails(page);
     await expect(
       page.getByLabel("Milestone 1 description", { exact: true }),
     ).toHaveValue("Saved milestone scope");
@@ -281,6 +295,7 @@ test.describe("persistent metadata and private attachments", () => {
     await save(page);
     backend.expire();
     await page.reload();
+    await expect(page).toHaveURL(/\/sign-in/);
     await expect(
       page.getByRole("heading", { name: "Persistent project", exact: true }),
     ).toHaveCount(0);
@@ -431,9 +446,11 @@ test.describe("persistent metadata and private attachments", () => {
       await expect.poll(() => backend.storage.objects.size).toBe(1);
       backend.expire();
       await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      // The gate removes the private page as soon as the session is gone.
+      await expect(page).toHaveURL(/\/sign-in\?next=%2Fprojects%2F0/);
       await expect(
-        page.getByText(/Sign in as a relevant participant/),
-      ).toBeVisible();
+        page.getByRole("button", { name: "Upload privately" }),
+      ).toHaveCount(0);
       release();
       await (await response).finished();
       const nonce = await backend.service.nonce(signer.address.toLowerCase());
@@ -452,9 +469,8 @@ test.describe("persistent metadata and private attachments", () => {
         },
       ]);
       await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-      await expect(
-        page.getByRole("button", { name: "Upload privately" }),
-      ).toBeEnabled();
+      await expect(page).toHaveURL(/\/projects\/0$/);
+      await expect(page.getByLabel("Select deliverable file")).toBeEnabled();
       await expect(page.getByText(/Uploaded privately. SHA-256/)).toHaveCount(
         0,
       );
@@ -638,6 +654,9 @@ test.describe("persistent metadata and private attachments", () => {
         (address) => window.__testWallet.account(address),
         signer.address,
       );
+      // Signing back in as the original wallet must not restore the draft.
+      await completeSignIn(page, "/projects/0");
+      await expect(page.getByLabel("Select deliverable file")).toBeVisible();
       await expect(
         page.getByText(/File selected: private-before-switch.txt/),
       ).toHaveCount(0);

@@ -1,9 +1,20 @@
 "use client";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowLeft, Info, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { parseMUSD, formatMUSD } from "@/lib/format";
-import { Button, Card, CardHeading, Field, Input, PageHeading } from "./ui";
+import {
+  Button,
+  Card,
+  CardBody,
+  CardFooter,
+  CardHeading,
+  Field,
+  Input,
+  KeyValue,
+  Notice,
+  PageHeading,
+} from "./ui";
 import { Dialog } from "./dialog";
 import { useRouter } from "next/navigation";
 import { useVerifiedDeployment } from "@/lib/blockchain/hooks/use-protocol";
@@ -17,11 +28,16 @@ import {
 } from "@/lib/blockchain/projects";
 import { deploymentScope } from "@/lib/blockchain/session";
 import { useWorkflowSession } from "./workflow-provider";
-import { usePreview } from "./providers";
+import { useUi } from "./providers";
 import { TransactionFeedback } from "./transaction-feedback";
 import { describeError, IntegrationError } from "@/lib/blockchain/errors";
 import { useBackendAuth } from "./auth-provider";
 import { syncConfirmedProject } from "@/lib/metadata-client";
+import {
+  classifyUnmined,
+  nonceGapMessage,
+  type PoolClient,
+} from "@/lib/blockchain/pool";
 
 interface DraftMilestone {
   title: string;
@@ -39,7 +55,7 @@ export function ProjectForm() {
   const tx = useProtocolTransaction();
   const session = useWorkflowSession();
   const router = useRouter();
-  const { toast } = usePreview();
+  const { toast } = useUi();
   const auth = useBackendAuth();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -52,6 +68,7 @@ export function ProjectForm() {
   const [reviewing, setReviewing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [synchronizing, setSynchronizing] = useState(false);
+  const [rechecking, setRechecking] = useState(false);
   const creatingRef = useRef(false);
   const dialogFeedback = useRef<HTMLDivElement>(null);
   const [creationConfirmed, setCreationConfirmed] = useState(false);
@@ -81,8 +98,15 @@ export function ProjectForm() {
       current.map((m, i) => (i === index ? { ...m, [key]: value } : m)),
     );
   }
+  // An unresolved creation from this form: reopen it instead of a new draft.
+  const pendingCreation =
+    tx.state.phase === "unconfirmed" && !!tx.state.hash && !!reviewedDraft;
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (pendingCreation) {
+      setReview(true);
+      return;
+    }
     if (creatingRef.current || tx.isBusy() || creationConfirmed) {
       setError(
         "A project request is already pending or confirmed. Check Transactions before creating another project.",
@@ -120,6 +144,136 @@ export function ProjectForm() {
       );
     } finally {
       setReviewing(false);
+    }
+  }
+  /**
+   * After a canonical successful receipt: read the project ID from that
+   * receipt's logs and synchronize metadata idempotently. Never sends another
+   * blockchain transaction; also used when a delayed receipt is recovered.
+   */
+  async function finishCreation(
+    transactionHash: `0x${string}`,
+    config: NonNullable<typeof deployment.verified>,
+    account: `0x${string}`,
+    draft: ProjectDraft,
+    prepared: ReturnType<typeof validateProjectDraft>,
+  ) {
+    setCreationConfirmed(true);
+    const receipt = await localClient.getTransactionReceipt({
+      hash: transactionHash,
+    });
+    const id = await createdProjectFromReceipt(
+      receipt.logs,
+      config.contracts.TrustEscrow.address,
+      account,
+    );
+    session.saveMetadata(
+      deploymentScope(config.manifest),
+      id,
+      prepared.metadata,
+    );
+    let synchronized = false;
+    if (auth.session?.address === account.toLowerCase()) {
+      setSynchronizing(true);
+      const sync = await syncConfirmedProject(config.manifest, id, {
+        title: draft.title,
+        description: draft.description,
+        milestones: draft.milestones.map((m, index) => ({
+          index,
+          name: m.title,
+          description: m.description?.trim() || m.title,
+        })),
+      });
+      synchronized = sync.synced;
+    }
+    toast(
+      auth.session
+        ? synchronized
+          ? `Project #${id} created on-chain. Metadata synchronized. Funding is a separate step.`
+          : `Project #${id} created on-chain. Metadata not synchronized; retry in Project metadata. Do not create another project.`
+        : `Project #${id} created. Funding is a separate step.`,
+    );
+    setReview(false);
+    router.push(`/projects/${id}`);
+  }
+  /**
+   * Re-check an unresolved creation by its original hash. Success completes
+   * the same creation; a revert frees the form for a new attempt; anything
+   * else keeps the attempt blocked with the node's explanation.
+   */
+  async function recheckCreation() {
+    const hash = tx.state.hash;
+    const config = deployment.verified;
+    const account = deployment.address;
+    if (!hash || !reviewedDraft || rechecking) return;
+    if (!config || !account) {
+      setError(
+        "The local network is being re-verified. Wait for it (or use Retry verification), then check the receipt again. Do not resubmit.",
+      );
+      return;
+    }
+    setRechecking(true);
+    setError("");
+    const attempt = session
+      .attempts()
+      .find((a) => a.state.hash?.toLowerCase() === hash.toLowerCase());
+    try {
+      const receipt = await localClient
+        .getTransactionReceipt({ hash })
+        .catch(() => undefined);
+      if (!receipt) {
+        const status = await classifyUnmined(
+          localClient as unknown as PoolClient,
+          hash,
+        );
+        setError(
+          status.kind === "nonce-gap"
+            ? nonceGapMessage(status.nonce, status.expected)
+            : status.kind === "unknown"
+              ? "The local node has no record of this transaction. It may have been sent to a different network. It is not confirmed; check MetaMask's network before retrying."
+              : status.kind === "nonce-used"
+                ? "Another transaction from this wallet used the same nonce, so this one can no longer be mined. Check Transactions before creating the project again."
+                : "Still waiting to be mined. Check again shortly; do not resubmit.",
+        );
+        return;
+      }
+      const sent = await localClient.getTransaction({ hash });
+      if (
+        sent.from.toLowerCase() !== account.toLowerCase() ||
+        sent.to?.toLowerCase() !==
+          config.contracts.TrustEscrow.address.toLowerCase()
+      )
+        throw new Error(
+          "This receipt does not belong to a project creation by this wallet.",
+        );
+      if (attempt)
+        session.update(attempt.id, {
+          ...attempt.state,
+          phase: receipt.status === "success" ? "confirmed" : "reverted",
+          blockNumber: receipt.blockNumber,
+          message:
+            receipt.status === "success"
+              ? "Receipt verified after a delayed confirmation."
+              : "The mined transaction reverted.",
+        });
+      if (receipt.status !== "success") {
+        tx.reset();
+        setError(
+          "The transaction was mined but reverted, so no project was created. You can review and submit again.",
+        );
+        return;
+      }
+      await finishCreation(
+        hash,
+        config,
+        account,
+        reviewedDraft.draft,
+        reviewedDraft.prepared,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : describeError(e).message);
+    } finally {
+      setRechecking(false);
     }
   }
   async function createProject() {
@@ -167,43 +321,13 @@ export function ProjectForm() {
         },
       );
       if (!result) return;
-      setCreationConfirmed(true);
-      const receipt = await localClient.getTransactionReceipt({
-        hash: result.transactionHash,
-      });
-      const id = await createdProjectFromReceipt(
-        receipt.logs,
-        config.contracts.TrustEscrow.address,
+      await finishCreation(
+        result.transactionHash,
+        config,
         account,
+        draft,
+        prepared,
       );
-      session.saveMetadata(
-        deploymentScope(config.manifest),
-        id,
-        prepared.metadata,
-      );
-      let synchronized = false;
-      if (auth.session?.address === account.toLowerCase()) {
-        setSynchronizing(true);
-        const sync = await syncConfirmedProject(config.manifest, id, {
-          title: draft.title,
-          description: draft.description,
-          milestones: draft.milestones.map((m, index) => ({
-            index,
-            name: m.title,
-            description: m.description?.trim() || m.title,
-          })),
-        });
-        synchronized = sync.synced;
-      }
-      toast(
-        auth.session
-          ? synchronized
-            ? `Project #${id} created on-chain. Metadata synchronized. Funding is a separate step.`
-            : `Project #${id} created on-chain. Metadata not synchronized; retry in Project metadata. Do not create another project.`
-          : `Project #${id} created. Funding is a separate step.`,
-      );
-      setReview(false);
-      router.push(`/projects/${id}`);
     } catch (e) {
       setError(
         e instanceof IntegrationError
@@ -221,23 +345,24 @@ export function ProjectForm() {
   return (
     <>
       <Link href="/projects" className="back-link">
-        <ArrowLeft size={14} />
-        All projects
+        <ArrowLeft size={14} aria-hidden="true" />
+        Projects
       </Link>
       <PageHeading
-        title="Start with a clear agreement"
-        description="Define the work and milestones. Creation is on-chain; descriptive text is synchronized separately after confirmation when signed in."
+        title="New project"
+        description="Describe the work, choose the freelancer and set milestones. You’ll fund escrow after the project is created."
       />
-      {!review && <TransactionFeedback state={tx.state} />}
+      {!review && (
+        <div className="mb-4">
+          <TransactionFeedback state={tx.state} />
+        </div>
+      )}
       <form noValidate onSubmit={(event) => void onSubmit(event)}>
-        <div className="detail-grid">
-          <Card>
-            <section className="form-section">
-              <h2>Project details</h2>
-              <p className="small text-muted">
-                Give the agreement a name and make the scope specific.
-              </p>
-              <div className="form-stack">
+        <div className="grid-main">
+          <div className="stack">
+            <Card label="Project">
+              <CardHeading title="Project" />
+              <CardBody className="form-stack">
                 <Field id="project-title" label="Project name">
                   <Input
                     id="project-title"
@@ -251,7 +376,7 @@ export function ProjectForm() {
                 <Field
                   id="scope"
                   label="Scope of work"
-                  hint="Do not include private deliverables or personal information in on-chain metadata."
+                  hint="What will be delivered and how it will be reviewed. Don’t include confidential material."
                 >
                   <textarea
                     id="scope"
@@ -267,7 +392,7 @@ export function ProjectForm() {
                 <Field
                   id="freelancer"
                   label="Freelancer wallet address"
-                  hint="The freelancer’s EVM address. This draft does not query that account."
+                  hint="Ask the freelancer for their wallet address. Only that wallet can accept the project."
                 >
                   <Input
                     id="freelancer"
@@ -280,241 +405,264 @@ export function ProjectForm() {
                     required
                   />
                 </Field>
-              </div>
-            </section>
-            <section className="form-section">
-              <h2>Milestone plan</h2>
-              <p className="small text-muted">
-                One to five milestones, delivered and settled in sequence. Due
-                dates use UTC.
-              </p>
-              <div className="form-stack">
+              </CardBody>
+            </Card>
+            <Card label="Milestones">
+              <CardHeading
+                title="Milestones"
+                description="One to five milestones, delivered and paid in order. Due dates are in UTC."
+              />
+              <ol className="milestones mt-3">
                 {milestones.map((m, i) => (
-                  <div key={i} className="milestone-form">
-                    <div className="milestone-form-head">
-                      <h3>Milestone {String(i + 1).padStart(2, "0")}</h3>
-                      {milestones.length > 1 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          className="icon-button"
-                          aria-label={`Remove milestone ${i + 1}`}
-                          onClick={() =>
-                            setMilestones((current) =>
-                              current.filter((_, j) => j !== i),
-                            )
-                          }
-                        >
-                          <Trash2 size={15} />
-                        </Button>
-                      )}
-                    </div>
-                    <Field id={`milestone-${i}-title`} label="Deliverable">
-                      <Input
-                        id={`milestone-${i}-title`}
-                        placeholder="e.g. Discovery & direction"
-                        value={m.title}
-                        maxLength={120}
-                        onChange={(e) => update(i, "title", e.target.value)}
-                      />
-                    </Field>
-                    <Field
-                      id={`milestone-${i}-description`}
-                      label="Milestone description (optional)"
-                    >
-                      <textarea
-                        className="input"
-                        id={`milestone-${i}-description`}
-                        maxLength={4000}
-                        value={m.description ?? ""}
-                        onChange={(e) =>
-                          update(i, "description", e.target.value)
-                        }
-                      />
-                    </Field>
-                    <div className="field-grid mt-4">
-                      <Field id={`milestone-${i}-amount`} label="Amount (mUSD)">
-                        <Input
+                  <li key={i} className="milestone">
+                    <span className="milestone-number" aria-hidden="true">
+                      {i + 1}
+                    </span>
+                    <div className="form-stack min-w-0">
+                      <div className="flex items-end gap-2">
+                        <div className="flex-1 min-w-0">
+                          <Field
+                            id={`milestone-${i}-title`}
+                            label="Deliverable"
+                          >
+                            <Input
+                              id={`milestone-${i}-title`}
+                              placeholder="e.g. Discovery & direction"
+                              value={m.title}
+                              maxLength={120}
+                              onChange={(e) =>
+                                update(i, "title", e.target.value)
+                              }
+                            />
+                          </Field>
+                        </div>
+                        {milestones.length > 1 && (
+                          <Button
+                            variant="ghost"
+                            className="icon-button"
+                            aria-label={`Remove milestone ${i + 1}`}
+                            onClick={() =>
+                              setMilestones((current) =>
+                                current.filter((_, j) => j !== i),
+                              )
+                            }
+                          >
+                            <Trash2 size={15} />
+                          </Button>
+                        )}
+                      </div>
+                      <div className="field-grid">
+                        <Field
                           id={`milestone-${i}-amount`}
-                          inputMode="decimal"
-                          placeholder="0.00"
-                          value={m.amount}
-                          onChange={(e) => update(i, "amount", e.target.value)}
-                        />
-                      </Field>
-                      <Field id={`milestone-${i}-due`} label="Due date (UTC)">
-                        <Input
-                          id={`milestone-${i}-due`}
-                          type="date"
-                          value={m.due}
-                          onChange={(e) => update(i, "due", e.target.value)}
+                          label="Amount (mUSD)"
+                        >
+                          <Input
+                            id={`milestone-${i}-amount`}
+                            inputMode="decimal"
+                            placeholder="0.00"
+                            value={m.amount}
+                            onChange={(e) =>
+                              update(i, "amount", e.target.value)
+                            }
+                          />
+                        </Field>
+                        <Field id={`milestone-${i}-due`} label="Due date (UTC)">
+                          <Input
+                            id={`milestone-${i}-due`}
+                            type="date"
+                            value={m.due}
+                            onChange={(e) => update(i, "due", e.target.value)}
+                          />
+                        </Field>
+                      </div>
+                      <Field
+                        id={`milestone-${i}-description`}
+                        label="Milestone description (optional)"
+                      >
+                        <textarea
+                          className="textarea"
+                          id={`milestone-${i}-description`}
+                          maxLength={4000}
+                          rows={2}
+                          value={m.description ?? ""}
+                          onChange={(e) =>
+                            update(i, "description", e.target.value)
+                          }
                         />
                       </Field>
                     </div>
-                  </div>
+                  </li>
                 ))}
+              </ol>
+              <CardFooter>
                 <Button
-                  type="button"
                   variant="secondary"
+                  size="sm"
                   disabled={milestones.length >= 5}
                   onClick={() =>
                     setMilestones((current) => [...current, blankMilestone()])
                   }
                 >
-                  <Plus size={15} />
+                  <Plus size={14} aria-hidden="true" />
                   Add milestone {milestones.length >= 5 && "(limit reached)"}
                 </Button>
-              </div>
-            </section>
-          </Card>
-          <div className="sticky-summary">
-            <Card>
-              <CardHeading title="Agreement summary" />
-              <div className="card-body pt-0!">
-                <dl className="summary-list">
-                  <div>
-                    <dt>Payment token</dt>
-                    <dd>MockUSD · 6 decimals</dd>
-                  </div>
-                  <div>
-                    <dt>Milestones</dt>
-                    <dd>{milestones.length} of 5</dd>
-                  </div>
-                  <div>
-                    <dt>Service fee</dt>
-                    <dd>1% of freelancer payout</dd>
-                  </div>
-                  <div>
-                    <dt>Review period</dt>
-                    <dd>72 hours</dd>
-                  </div>
-                </dl>
-                <div className="summary-total">
-                  <span>Project budget</span>
-                  <span className="money">
-                    {formatMUSD(total)} <span className="currency">mUSD</span>
-                  </span>
-                </div>
-                <p className="small text-muted mt-4">
-                  The client funds the full budget. Fees are deducted from
-                  freelancer payouts, rather than added to this budget.
-                </p>
-                <div className="info-note mt-5">
-                  <Info size={15} />
-                  <p>
-                    Titles, scope and milestone descriptions stay in browser
-                    memory and disappear on refresh. Only a metadata hash,
-                    wallet addresses, amounts and deadlines are stored on-chain
-                    after confirmation. Do not include confidential content.
-                  </p>
-                </div>
-                <Button
-                  className="w-full mt-5"
-                  type="submit"
-                  disabled={
-                    reviewing || creating || tx.isBusy() || creationConfirmed
-                  }
-                >
-                  {reviewing ? "Checking draft…" : "Review draft"}
-                </Button>
-              </div>
+              </CardFooter>
             </Card>
           </div>
+          <aside className="sticky-side">
+            <Card label="Summary">
+              <CardHeading title="Summary" />
+              <CardBody className="stack-sm">
+                <KeyValue
+                  items={[
+                    { label: "Payment token", value: "MockUSD (mUSD)" },
+                    { label: "Milestones", value: `${milestones.length} of 5` },
+                    { label: "Service fee", value: "1% of each payout" },
+                    { label: "Review window", value: "72 hours" },
+                  ]}
+                />
+                <div className="figures figures-1">
+                  <div>
+                    <dt>Project budget</dt>
+                    <dd className="money">
+                      {formatMUSD(total)} <span className="currency">mUSD</span>
+                    </dd>
+                  </div>
+                </div>
+                <p className="small text-muted">
+                  You fund the full budget into escrow. The service fee is taken
+                  from the freelancer’s payouts, not added to your budget.
+                </p>
+                <Notice tone="neutral">
+                  <p>
+                    The project name and descriptions are saved privately after
+                    creation. Only a fingerprint, wallet addresses, amounts and
+                    deadlines go on-chain.
+                  </p>
+                </Notice>
+                <Button
+                  className="btn-block"
+                  type="submit"
+                  disabled={
+                    reviewing ||
+                    creating ||
+                    (tx.isBusy() && !pendingCreation) ||
+                    creationConfirmed
+                  }
+                >
+                  {reviewing
+                    ? "Checking draft…"
+                    : pendingCreation
+                      ? "Check pending creation"
+                      : "Review draft"}
+                </Button>
+                {error && !review && (
+                  <p
+                    role="alert"
+                    aria-label="Draft validation"
+                    className="form-error"
+                  >
+                    {error}
+                  </p>
+                )}
+              </CardBody>
+            </Card>
+          </aside>
         </div>
-        {error && !review && (
-          <p
-            role="alert"
-            aria-label="Draft validation"
-            className="form-error mt-5"
-          >
-            {error}
-          </p>
-        )}
       </form>
       <Dialog
         open={review}
         onClose={() => setReview(false)}
         title="Review your project draft"
       >
-        <span className="badge badge-blue">Local draft · not created</span>
-        <div ref={dialogFeedback} className="mt-4">
-          <TransactionFeedback state={tx.state} />
-          {error && (
-            <p
-              role="alert"
-              aria-label="Project creation"
-              className="form-error mt-3"
+        <div className="stack-sm">
+          <span className="chip w-fit">Local draft · not created</span>
+          <div>
+            <h3>{title}</h3>
+            <p className="small text-muted mt-1 whitespace-pre-wrap break-words">
+              {description}
+            </p>
+          </div>
+          <KeyValue
+            items={[
+              { label: "Milestones", value: milestones.length },
+              { label: "Budget", value: `${formatMUSD(total)} mUSD` },
+            ]}
+          />
+          <p className="small text-muted">
+            {deployment.ready
+              ? "This creates an unfunded project with you as the client. Check the amounts and dates — they can’t be changed later. Funding is a separate step afterwards."
+              : "Connect a wallet to a verified local deployment to create this project. This is still an unsubmitted local draft."}{" "}
+            Creating needs a little local ETH for gas, but no mUSD.
+          </p>
+          {!deployment.ready && deployment.isConnected && (
+            <Notice tone="warning" role="status">
+              <p>
+                {!deployment.supported
+                  ? "Switch your wallet to Hardhat Local (31337)."
+                  : deployment.error
+                    ? describeError(deployment.error).message
+                    : "Verifying the local deployment. Wait for verification before signing."}
+              </p>
+            </Notice>
+          )}
+          <div ref={dialogFeedback} className="stack-sm">
+            <TransactionFeedback state={tx.state} />
+            {error && (
+              <p
+                role="alert"
+                aria-label="Project creation"
+                className="form-error"
+              >
+                {error}
+              </p>
+            )}
+          </div>
+          <Button
+            className="btn-block"
+            disabled={
+              !deployment.ready ||
+              creating ||
+              tx.isBusy() ||
+              creationConfirmed ||
+              !sameReviewContext
+            }
+            onClick={() => void createProject()}
+          >
+            {synchronizing
+              ? "Project confirmed · saving details…"
+              : creating
+                ? "Creating project…"
+                : creationConfirmed
+                  ? "Project confirmed · check Transactions"
+                  : deployment.ready
+                    ? "Create project in wallet"
+                    : "Create project · not enabled"}
+          </Button>
+          {tx.state.phase === "unconfirmed" && tx.state.hash && (
+            <Button
+              variant="secondary"
+              className="btn-block"
+              disabled={rechecking || creating}
+              onClick={() => void recheckCreation()}
             >
-              {error}
+              {rechecking ? "Checking receipt…" : "Check receipt again"}
+            </Button>
+          )}
+          {deployment.ready && !sameReviewContext && (
+            <p className="small text-muted">
+              The connection changed since draft review. Continue editing, then
+              review again.
             </p>
           )}
+          <Button
+            className="btn-block"
+            variant="ghost"
+            onClick={() => setReview(false)}
+          >
+            Continue editing
+          </Button>
         </div>
-        <h3 className="mt-4">{title}</h3>
-        <p className="small text-muted mt-2 whitespace-pre-wrap break-words">
-          {description}
-        </p>
-        <dl className="summary-list mt-4">
-          <div>
-            <dt>Milestones</dt>
-            <dd>{milestones.length}</dd>
-          </div>
-          <div>
-            <dt>Budget</dt>
-            <dd>{formatMUSD(total)} mUSD</dd>
-          </div>
-        </dl>
-        <p className="small text-muted mt-4">
-          {deployment.ready
-            ? "You will create an unfunded project as the connected client wallet. Review all amounts and deadlines. Creation does not approve tokens or fund escrow."
-            : "Connect a wallet to a verified persistent local deployment to create this project. This remains an unsubmitted local draft."}{" "}
-          Descriptive metadata is not permanently saved. Creation requires local
-          ETH for gas; it does not require mUSD. Token approval and escrow
-          funding are separate later steps.
-        </p>
-        {!deployment.ready && deployment.isConnected && (
-          <p role="status" className="wallet-warning mt-3">
-            {!deployment.supported
-              ? "Switch your wallet to Hardhat Local (31337)."
-              : deployment.error
-                ? describeError(deployment.error).message
-                : "Verifying the local deployment. Wait for verification before signing."}
-          </p>
-        )}
-        <Button
-          className="w-full mt-5"
-          type="button"
-          disabled={
-            !deployment.ready ||
-            creating ||
-            tx.isBusy() ||
-            creationConfirmed ||
-            !sameReviewContext
-          }
-          onClick={() => void createProject()}
-        >
-          {synchronizing
-            ? "Project confirmed · synchronizing metadata…"
-            : creating
-              ? "Creating project…"
-              : creationConfirmed
-                ? "Project confirmed · check Transactions"
-                : deployment.ready
-                  ? "Create project in wallet"
-                  : "Create project · not enabled"}
-        </Button>
-        {deployment.ready && !sameReviewContext && (
-          <p className="small text-muted mt-3">
-            The connection changed since draft review. Continue editing, then
-            review again.
-          </p>
-        )}
-        <Button
-          className="w-full mt-2"
-          variant="ghost"
-          onClick={() => setReview(false)}
-        >
-          Continue editing
-        </Button>
       </Dialog>
     </>
   );

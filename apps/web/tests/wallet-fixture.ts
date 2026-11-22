@@ -77,7 +77,11 @@ export async function installWallet(
           params?: unknown[];
         }) {
           calls.push(method);
-          if (method === "personal_sign" && options.authSigning) {
+          if (
+            method === "personal_sign" &&
+            (options.authSigning ||
+              typeof window.__signBackendMessage === "function")
+          ) {
             const hex = params?.[0] as string;
             const message = new TextDecoder().decode(
               Uint8Array.from(hex.slice(2).match(/.{2}/g) ?? [], (byte) =>

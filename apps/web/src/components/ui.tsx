@@ -1,54 +1,77 @@
+"use client";
 import Link from "next/link";
+import { useState } from "react";
 import {
+  AlertTriangle,
   ArrowRight,
   Check,
-  Circle,
-  Clock3,
-  FolderOpen,
-  LoaderCircle,
-  X,
+  CheckCircle2,
+  Copy,
+  Info,
+  XCircle,
 } from "lucide-react";
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
   ReactNode,
+  TextareaHTMLAttributes,
 } from "react";
-import type { TransactionState } from "@/lib/models";
 
+type Variant = "primary" | "secondary" | "ghost" | "danger";
 export function Button({
   variant = "primary",
+  size,
   className = "",
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "primary" | "secondary" | "ghost" | "danger";
+  variant?: Variant;
+  size?: "sm";
 }) {
-  return <button className={`btn btn-${variant} ${className}`} {...props} />;
+  return (
+    <button
+      type="button"
+      className={`btn btn-${variant} ${size ? `btn-${size}` : ""} ${className}`}
+      {...props}
+    />
+  );
 }
 export function ButtonLink({
   href,
   children,
   variant = "primary",
+  size,
   className = "",
 }: {
   href: string;
   children: ReactNode;
-  variant?: "primary" | "secondary" | "ghost";
+  variant?: Exclude<Variant, "danger">;
+  size?: "sm";
   className?: string;
 }) {
   return (
-    <Link href={href} className={`btn btn-${variant} ${className}`}>
+    <Link
+      href={href}
+      className={`btn btn-${variant} ${size ? `btn-${size}` : ""} ${className}`}
+    >
       {children}
     </Link>
   );
 }
+/** A bordered surface. Use sparingly: group related content only. */
 export function Card({
   children,
   className = "",
+  label,
 }: {
   children: ReactNode;
   className?: string;
+  label?: string;
 }) {
-  return <section className={`card ${className}`}>{children}</section>;
+  return (
+    <section className={`panel ${className}`} aria-label={label}>
+      {children}
+    </section>
+  );
 }
 export function CardHeading({
   title,
@@ -56,18 +79,30 @@ export function CardHeading({
   action,
 }: {
   title: string;
-  description?: string;
+  description?: ReactNode;
   action?: ReactNode;
 }) {
   return (
-    <div className="card-heading">
-      <div>
+    <div className="panel-header">
+      <div className="min-w-0">
         <h2>{title}</h2>
-        {description && <p className="text-muted small mt-1">{description}</p>}
+        {description && <p>{description}</p>}
       </div>
       {action}
     </div>
   );
+}
+export function CardBody({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <div className={`panel-body ${className}`}>{children}</div>;
+}
+export function CardFooter({ children }: { children: ReactNode }) {
+  return <div className="panel-footer">{children}</div>;
 }
 export function PageHeading({
   eyebrow,
@@ -75,19 +110,38 @@ export function PageHeading({
   description,
   action,
 }: {
-  eyebrow?: string;
+  eyebrow?: ReactNode;
   title: string;
-  description: string;
+  description?: ReactNode;
   action?: ReactNode;
 }) {
   return (
-    <div className="page-heading">
+    <header className="page-header">
       <div>
-        {eyebrow && <p className="eyebrow">{eyebrow}</p>}
+        {eyebrow && <div className="eyebrow">{eyebrow}</div>}
         <h1>{title}</h1>
-        <p className="text-muted mt-2">{description}</p>
+        {description && <p className="page-description">{description}</p>}
       </div>
-      {action && <div className="page-action">{action}</div>}
+      {action && <div className="page-actions">{action}</div>}
+    </header>
+  );
+}
+export function SectionTitle({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description?: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="section-title">
+      <div>
+        <h2>{title}</h2>
+        {description && <p>{description}</p>}
+      </div>
+      {action}
     </div>
   );
 }
@@ -97,6 +151,12 @@ export function Input({
 }: InputHTMLAttributes<HTMLInputElement>) {
   return <input className={`input ${className}`} {...props} />;
 }
+export function Textarea({
+  className = "",
+  ...props
+}: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return <textarea className={`textarea ${className}`} {...props} />;
+}
 export function Field({
   label,
   id,
@@ -105,7 +165,7 @@ export function Field({
 }: {
   label: string;
   id: string;
-  hint?: string;
+  hint?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -113,35 +173,79 @@ export function Field({
       <label htmlFor={id}>{label}</label>
       {children}
       {hint && (
-        <p id={`${id}-hint`} className="text-muted small">
+        <p id={`${id}-hint`} className="field-hint">
           {hint}
         </p>
       )}
     </div>
   );
 }
+const tones: Record<
+  string,
+  "neutral" | "info" | "success" | "warning" | "danger"
+> = {
+  Completed: "success",
+  Settled: "success",
+  Approved: "success",
+  Confirmed: "success",
+  Eligible: "success",
+  Finalized: "success",
+  Active: "info",
+  "Voting open": "info",
+  "In review": "warning",
+  Submitted: "warning",
+  "Awaiting acceptance": "warning",
+  "Response window": "warning",
+  "Ready to finalize": "warning",
+  Pending: "neutral",
+  Unfunded: "neutral",
+  Closed: "neutral",
+  "Not eligible": "neutral",
+  Disputed: "danger",
+  Failed: "danger",
+};
 export function StatusBadge({ status }: { status: string }) {
-  const tone = ["Approved", "Completed", "Confirmed", "Eligible"].includes(
-    status,
-  )
-    ? "green"
-    : ["Disputed", "Failed"].includes(status)
-      ? "red"
-      : [
-            "Submitted",
-            "Response window",
-            "Awaiting acceptance",
-            "Pending",
-          ].includes(status)
-        ? "amber"
-        : ["Active", "Voting open"].includes(status)
-          ? "blue"
-          : "gray";
   return (
-    <span className={`badge badge-${tone}`}>
-      <span className="status-dot" />
+    <span className={`status status-${tones[status] ?? "neutral"}`}>
       {status}
     </span>
+  );
+}
+export function Notice({
+  tone = "info",
+  title,
+  children,
+  role,
+  label,
+  className = "",
+}: {
+  tone?: "info" | "warning" | "danger" | "success" | "neutral";
+  title?: string;
+  children?: ReactNode;
+  role?: "alert" | "status";
+  label?: string;
+  className?: string;
+}) {
+  const Icon =
+    tone === "danger"
+      ? XCircle
+      : tone === "warning"
+        ? AlertTriangle
+        : tone === "success"
+          ? CheckCircle2
+          : Info;
+  return (
+    <div
+      className={`notice notice-${tone} ${className}`}
+      role={role}
+      aria-label={label}
+    >
+      <Icon size={16} aria-hidden="true" />
+      <div className="min-w-0 grid gap-1">
+        {title && <h3>{title}</h3>}
+        {children}
+      </div>
+    </div>
   );
 }
 export function EmptyState({
@@ -150,17 +254,25 @@ export function EmptyState({
   action,
 }: {
   title: string;
-  description: string;
+  description: ReactNode;
   action?: ReactNode;
 }) {
   return (
-    <div className="empty-state">
-      <span className="empty-icon">
-        <FolderOpen size={25} aria-hidden="true" />
-      </span>
+    <div className="empty">
       <h3>{title}</h3>
       <p>{description}</p>
       {action}
+    </div>
+  );
+}
+export function Spinner() {
+  return <span className="spinner" aria-hidden="true" />;
+}
+export function LoadingRow({ label }: { label: string }) {
+  return (
+    <div role="status" className="loading-row">
+      <Spinner />
+      {label}
     </div>
   );
 }
@@ -169,16 +281,98 @@ export function Skeleton({ className = "" }: { className?: string }) {
 }
 export function LoadingPage() {
   return (
-    <div role="status" aria-label="Loading workspace" className="space-y-6">
-      <Skeleton className="h-10 w-64" />
-      <div className="stats-grid">
-        {[1, 2, 3, 4].map((i) => (
-          <Skeleton key={i} className="h-36" />
-        ))}
-      </div>
-      <Skeleton className="h-80" />
+    <div role="status" aria-label="Loading workspace" className="stack">
+      <Skeleton className="h-8 w-56" />
+      <Skeleton className="h-24" />
+      <Skeleton className="h-72" />
       <span className="sr-only">Loading workspace…</span>
     </div>
+  );
+}
+export function KeyValue({
+  items,
+  stacked = false,
+  className = "",
+}: {
+  items: { label: string; value: ReactNode; testId?: string }[];
+  stacked?: boolean;
+  className?: string;
+}) {
+  return (
+    <dl className={`kv ${stacked ? "kv-stacked" : ""} ${className}`}>
+      {items.map((item) => (
+        <div key={item.label}>
+          <dt>{item.label}</dt>
+          <dd data-testid={item.testId}>{item.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+export function Disclosure({
+  summary,
+  hint,
+  children,
+  open,
+  plain = false,
+  className = "",
+}: {
+  summary: string;
+  hint?: ReactNode;
+  children: ReactNode;
+  open?: boolean;
+  plain?: boolean;
+  className?: string;
+}) {
+  return (
+    <details
+      className={`disclosure ${plain ? "disclosure-plain" : ""} ${className}`}
+      open={open}
+    >
+      <summary>
+        {summary}
+        {hint && <span className="summary-hint">{hint}</span>}
+      </summary>
+      <div className="disclosure-body">{children}</div>
+    </details>
+  );
+}
+/** Shortened, copyable identifier; the full value stays in the title and clipboard. */
+export function Hash({
+  value,
+  label = "Copy",
+  full = false,
+}: {
+  value: string;
+  label?: string;
+  full?: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <span className="hash" title={value}>
+      <span className={full ? "hash-full" : undefined}>
+        {full || value.length <= 20
+          ? value
+          : `${value.slice(0, 8)}…${value.slice(-6)}`}
+      </span>
+      <button
+        type="button"
+        className="copy-button"
+        aria-label={`${label} ${value}`}
+        onClick={() => {
+          void navigator.clipboard
+            ?.writeText(value)
+            .then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            })
+            .catch(() => undefined);
+        }}
+      >
+        {copied ? <Check size={11} /> : <Copy size={11} />}
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </span>
   );
 }
 export function MilestoneProgress({
@@ -200,20 +394,10 @@ export function MilestoneProgress({
       >
         <span style={{ width: `${total ? (completed / total) * 100 : 0}%` }} />
       </div>
-      <span className="small text-muted">
+      <span className="small text-faint">
         {completed}/{total}
       </span>
     </div>
-  );
-}
-export function TransactionStatus({ status }: { status: TransactionState }) {
-  const Icon =
-    status === "Confirmed" ? Check : status === "Failed" ? X : LoaderCircle;
-  return (
-    <span className={`transaction-status ${status.toLowerCase()}`}>
-      <Icon size={15} aria-hidden="true" />
-      {status}
-    </span>
   );
 }
 export function DataTable<T>({
@@ -233,7 +417,7 @@ export function DataTable<T>({
 }) {
   return (
     <div className="table-container">
-      <table className="data-table">
+      <table className="data-table" aria-label={caption}>
         <caption className="sr-only">{caption}</caption>
         <thead>
           <tr>
@@ -268,15 +452,17 @@ export function TimelineItem({
   detail: string;
   state?: "done" | "current" | "upcoming";
 }) {
-  const Icon = state === "done" ? Check : state === "current" ? Clock3 : Circle;
   return (
-    <li className={`timeline-item ${state}`}>
-      <span className="timeline-icon">
-        <Icon size={15} aria-hidden="true" />
+    <li className={`step-item ${state}`}>
+      <span className="step-dot" aria-hidden="true">
+        {state === "done" && <Check size={11} strokeWidth={3} />}
       </span>
       <div>
-        <h3>{title}</h3>
-        <p className="small text-muted mt-1">{detail}</p>
+        <h3>
+          {title}
+          {state === "current" && <span className="sr-only"> (current)</span>}
+        </h3>
+        <p>{detail}</p>
       </div>
     </li>
   );
@@ -291,7 +477,7 @@ export function TextLink({
   return (
     <Link className="text-link" href={href}>
       {children}
-      <ArrowRight size={15} aria-hidden="true" />
+      <ArrowRight size={14} aria-hidden="true" />
     </Link>
   );
 }

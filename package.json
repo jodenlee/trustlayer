@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "trustlayer",
   "version": "0.1.0",
   "private": true,
@@ -20,6 +20,12 @@
     "web:build": "npm --prefix apps/web run build",
     "web:test": "npm --prefix apps/web test",
     "chain": "node --import tsx scripts/local-chain.ts",
+    "dev": "node --import tsx scripts/dev.ts start",
+    "dev:stop": "node --import tsx scripts/dev.ts stop",
+    "dev:status": "node --import tsx scripts/dev.ts status",
+    "dev:init": "node --import tsx scripts/dev.ts init",
+    "dev:drop-queued": "node --import tsx scripts/dev.ts drop-queued",
+    "verify:nonce": "node --import tsx apps/web/scripts/verify-nonce-recovery.ts",
     "verify:persistence": "node --import tsx apps/web/scripts/verify-chain-persistence.ts",
     "provision:wallets": "hardhat run scripts/provision-local-wallets.ts --network localhost"
   },

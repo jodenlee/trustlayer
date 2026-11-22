@@ -1,3 +1,5 @@
-import { ProjectList } from "@/components/project-list";
+import { ChainProjects } from "@/components/chain-projects";
 export const metadata = { title: "Projects" };
-export default ProjectList;
+export default function ProjectsPage() {
+  return <ChainProjects />;
+}

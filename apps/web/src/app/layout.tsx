@@ -4,11 +4,11 @@ import "./globals.css";
 import { Providers } from "@/components/providers";
 export const metadata: Metadata = {
   title: {
-    default: "TrustLayer — Work built on trust",
-    template: "%s | TrustLayer",
+    default: "TrustLayer",
+    template: "%s · TrustLayer",
   },
   description:
-    "A local TrustLayer workspace with injected wallet connection and verified contract reads. Project transactions are not enabled.",
+    "Milestone escrow and juror-based dispute resolution for freelance work.",
 };
 export default function RootLayout({
   children,

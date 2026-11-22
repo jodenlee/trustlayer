@@ -16,10 +16,11 @@ import {
 import { deploymentScope, type AttemptDetails } from "@/lib/blockchain/session";
 import { describeError } from "@/lib/blockchain/errors";
 import type { ReceiptSummary } from "@/lib/blockchain/transactions";
-import { Button } from "./ui";
+import { Button, Notice } from "./ui";
 import { Dialog } from "./dialog";
 import { TransactionFeedback } from "./transaction-feedback";
-import { usePreview } from "./providers";
+import { useUi } from "./providers";
+import { useBackendAuth } from "./auth-provider";
 
 type Submission = (context: ProtocolWriteContext) => Promise<Hash>;
 /** Snapshot the reviewed action, actor and deployment. Keep feedback visible until explicit dismissal. */
@@ -42,7 +43,10 @@ const ReviewContext = createContext<{
 export function ReviewedActionProvider({ children }: { children: ReactNode }) {
   const deployment = useVerifiedDeployment();
   const tx = useProtocolTransaction();
-  const { toast } = usePreview();
+  const { toast } = useUi();
+  // A review belongs to the signed-in wallet; hide it once that session ends
+  // (sign-out, expiry, account switch) unless a request is already in flight.
+  const auth = useBackendAuth();
   const [review, setReview] = useState<{
     actor: string;
     scope: string;
@@ -124,49 +128,59 @@ export function ReviewedActionProvider({ children }: { children: ReactNode }) {
     >
       {children}
       <Dialog
-        open={!!review}
+        open={
+          !!review &&
+          (review.actor === auth.session?.address.toLowerCase() || tx.isBusy())
+        }
         title={review?.title ?? "Review transaction"}
         onClose={() => setReview(undefined)}
       >
-        <div ref={feedback}>
-          <TransactionFeedback state={tx.state} />
-          {error && (
-            <p role="alert" className="form-error mt-3">
-              {error}
-            </p>
+        <div className="stack-sm">
+          <div className="text-muted">{review?.content}</div>
+          <div ref={feedback} className="stack-sm">
+            <TransactionFeedback state={tx.state} />
+            {error && (
+              <p role="alert" className="form-error">
+                {error}
+              </p>
+            )}
+          </div>
+          {!same && (
+            <Notice tone="warning">
+              <p>
+                The wallet or deployment changed or is being verified. Review
+                again after verification.
+              </p>
+            </Notice>
           )}
-        </div>
-        <p className="wallet-address mt-3">Acting wallet: {review?.actor}</p>
-        <div className="mt-4">{review?.content}</div>
-        {!same && (
-          <p className="wallet-warning mt-3">
-            The wallet or deployment changed or is being verified. Review again
-            after verification.
+          <p className="small text-faint">
+            Acting wallet <span className="mono">{review?.actor}</span>
           </p>
-        )}
-        <Button
-          type="button"
-          className="w-full mt-5"
-          disabled={!same || tx.isBusy() || done}
-          onClick={() => void confirm()}
-        >
-          {done
-            ? "Confirmed"
-            : tx.isBusy()
-              ? "Request pending…"
-              : "Confirm in wallet"}
-        </Button>
+          <Button
+            className="btn-block"
+            disabled={!same || tx.isBusy() || done}
+            onClick={() => void confirm()}
+          >
+            {done
+              ? "Confirmed"
+              : tx.isBusy()
+                ? "Request pending…"
+                : "Confirm in wallet"}
+          </Button>
+        </div>
       </Dialog>
     </ReviewContext.Provider>
   );
 }
-export function ReviewedAction(props: ActionProps) {
+export function ReviewedAction(
+  props: ActionProps & { variant?: "primary" | "secondary" },
+) {
   const context = useContext(ReviewContext);
   const deployment = useVerifiedDeployment();
   if (!context) throw new Error("ReviewedActionProvider required");
   return (
     <Button
-      type="button"
+      variant={props.variant}
       disabled={props.disabled || !deployment.ready || context.busy}
       onClick={() => context.open(props)}
     >

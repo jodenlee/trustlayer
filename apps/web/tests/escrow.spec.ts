@@ -2,12 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 import { escrowRpc } from "../test-support/escrow-rpc";
 import { TrustEscrowAbi } from "@trustlayer/contracts";
 import { encodeFunctionData } from "viem";
-import {
-  accountA,
-  accountB,
-  connectWallet,
-  installWallet,
-} from "./wallet-fixture";
+import { accountA, accountB, installWallet } from "./wallet-fixture";
+import { installAuth, signIn, switchAccount } from "./auth-fixture";
 
 async function openProject(
   page: Page,
@@ -15,21 +11,11 @@ async function openProject(
   account: string = accountA,
 ) {
   await installWallet(page, { forwardRpc: true });
+  await installAuth(page);
   await state.install(page);
-  await page.goto("/projects/0");
-  await connectWallet(page);
-  await expect(
-    page.getByRole("button", { name: "Manage wallet", exact: true }).first(),
-  ).toBeVisible();
-  await page.keyboard.press("Escape");
-  if (account !== accountA)
-    await page.evaluate(
-      (address) => window.__testWallet.account(address),
-      account,
-    );
-  await expect(
-    page.getByRole("heading", { name: "Agreement & funding" }),
-  ).toBeVisible();
+  await signIn(page, "/projects/0");
+  if (account !== accountA) await switchAccount(page, account);
+  await expect(page.getByRole("heading", { name: "Milestones" })).toBeVisible();
 }
 async function confirm(page: Page, label: string) {
   await page.getByRole("button", { name: label, exact: true }).click();
@@ -43,21 +29,17 @@ test("on-chain discovery identifies the current wallet role and excludes unrelat
 }) => {
   const state = escrowRpc();
   await installWallet(page, { forwardRpc: true });
+  await installAuth(page);
   await state.install(page);
-  await page.goto("/projects");
-  await connectWallet(page);
-  await page.keyboard.press("Escape");
+  await signIn(page, "/projects");
   await expect(
     page.getByRole("table", { name: "On-chain wallet projects" }),
-  ).toContainText("Client");
-  await page.evaluate(
-    (address) => window.__testWallet.account(address),
-    accountB,
-  );
+  ).toContainText("client");
+  await switchAccount(page, accountB);
   await expect(
     page.getByRole("table", { name: "On-chain wallet projects" }),
-  ).toContainText("Freelancer");
-  await page.evaluate(() => window.__testWallet.account(`0x${"3".repeat(40)}`));
+  ).toContainText("freelancer");
+  await switchAccount(page, `0x${"3".repeat(40)}`);
   await expect(
     page.getByRole("heading", { name: "No on-chain projects yet" }),
   ).toBeVisible();
@@ -68,6 +50,7 @@ test("project discovery shows a loading state instead of fabricated zero project
 }) => {
   const state = escrowRpc();
   await installWallet(page, { forwardRpc: true });
+  await installAuth(page);
   await state.install(page);
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -83,9 +66,7 @@ test("project discovery shows a loading state instead of fabricated zero project
       await gate;
     await route.fallback();
   });
-  await page.goto("/projects");
-  await connectWallet(page);
-  await page.keyboard.press("Escape");
+  await signIn(page, "/projects");
   await expect(
     page.getByRole("status").filter({ hasText: "Loading on-chain projects" }),
   ).toBeVisible();
@@ -95,7 +76,7 @@ test("project discovery shows a loading state instead of fabricated zero project
   release();
   await expect(
     page.getByRole("table", { name: "On-chain wallet projects" }),
-  ).toContainText("Client");
+  ).toContainText("client");
 });
 test("approval is exact, cannot duplicate while pending, and is separate from funding", async ({
   page,
@@ -103,10 +84,12 @@ test("approval is exact, cannot duplicate while pending, and is separate from fu
   const state = escrowRpc();
   await openProject(page, state);
   state.defer(true);
-  await confirm(page, "1. Approve exact mUSD allowance");
-  await expect(page.getByText("confirming", { exact: true })).toBeVisible();
+  await confirm(page, "1. Approve mUSD");
   await expect(
-    page.getByRole("button", { name: "1. Approve exact mUSD allowance" }),
+    page.getByText("Waiting for confirmation…", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "1. Approve mUSD" }),
   ).toBeDisabled();
   await expect(
     page.getByRole("button", { name: "2. Fund escrow" }),
@@ -134,7 +117,7 @@ test("insufficient mUSD displays a useful error and disables approval/funding", 
     page.getByRole("alert", { name: "Funding balance" }),
   ).toContainText("Insufficient mUSD balance");
   await expect(
-    page.getByRole("button", { name: "1. Approve exact mUSD allowance" }),
+    page.getByRole("button", { name: "1. Approve mUSD" }),
   ).toBeDisabled();
   await expect(
     page.getByRole("button", { name: "2. Fund escrow" }),
@@ -149,15 +132,12 @@ test("only the named freelancer can accept a funded project", async ({
   await expect(
     page.getByRole("button", { name: "Accept project", exact: true }),
   ).toHaveCount(0);
-  await page.evaluate(
-    (address) => window.__testWallet.account(address),
-    accountB,
-  );
+  await switchAccount(page, accountB);
   await expect(
     page.getByRole("button", { name: "Accept project", exact: true }),
   ).toBeEnabled();
   await confirm(page, "Accept project");
-  await expect(page.getByText("Active", { exact: true })).toBeVisible();
+  await expect(page.getByText("Active", { exact: true }).first()).toBeVisible();
   expect(state.writes).toEqual(["acceptProject"]);
 });
 test("submission accepts a non-sensitive hash and displays confirmed review deadline", async ({
@@ -166,16 +146,16 @@ test("submission accepts a non-sensitive hash and displays confirmed review dead
   const state = escrowRpc({ state: 2 });
   await openProject(page, state, accountB);
   await page
-    .getByLabel("Non-sensitive content hash")
+    .getByLabel("Deliverable fingerprint (SHA-256)")
     .fill("private file contents");
   await expect(
     page.getByRole("button", { name: "Submit milestone", exact: true }),
   ).toBeDisabled();
   await page
-    .getByLabel("Non-sensitive content hash")
+    .getByLabel("Deliverable fingerprint (SHA-256)")
     .fill(`0x${"a".repeat(64)}`);
   await confirm(page, "Submit milestone");
-  await expect(page.getByText("Submitted", { exact: true })).toBeVisible();
+  await expect(page.getByText("In review", { exact: true })).toBeVisible();
   await expect(page.getByText(/Review deadline/)).toBeVisible();
   expect(state.writes).toEqual(["submitMilestone"]);
 });
@@ -184,9 +164,7 @@ test("client approval displays gross, exact fee and net, then records actual set
 }, testInfo) => {
   const state = escrowRpc({ state: 2, milestoneState: 1 });
   await openProject(page, state);
-  const allocation = page.getByText("Full freelancer payout if approved", {
-    exact: false,
-  });
+  const allocation = page.getByLabel("Payout if approved");
   await expect(allocation).toContainText("100.00");
   await expect(allocation).toContainText("1.00");
   await expect(allocation).toContainText("99.00");
@@ -217,24 +195,28 @@ test("changing wallet invalidates an open financial review dialog", async ({
   await openProject(page, state);
   await page
     .getByRole("button", {
-      name: "1. Approve exact mUSD allowance",
+      name: "1. Approve mUSD",
       exact: true,
     })
     .click();
+  await expect(
+    page.getByRole("dialog", { name: "Approve mUSD for escrow" }),
+  ).toBeVisible();
   await page.evaluate(
     (address) => window.__testWallet.account(address),
     accountB,
   );
+  // The session is revoked and the review dialog disappears with the page.
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fprojects%2F0&ended=1/);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(
-    page
-      .getByRole("dialog")
-      .getByText(/wallet, deployment or milestone changed/),
-  ).toBeVisible();
-  await expect(
-    page
-      .getByRole("dialog")
-      .getByRole("button", { name: "Confirm in wallet", exact: true }),
-  ).toBeDisabled();
+    page.getByRole("button", { name: "Confirm in wallet", exact: true }),
+  ).toHaveCount(0);
+  expect(
+    await page.evaluate(() =>
+      window.__testWallet.calls.includes("eth_sendTransaction"),
+    ),
+  ).toBe(false);
   expect(state.writes).toEqual([]);
 });
 test("fresh preflight cannot approve a later milestone than the one reviewed", async ({
@@ -268,15 +250,16 @@ test("timeout release remains unavailable until chain time is strictly after rev
   await openProject(page, state, accountB);
   await expect(
     page.getByRole("button", {
-      name: "Release after review timeout",
+      name: "Release payment after review period",
       exact: true,
     }),
   ).toHaveCount(0);
   state.advance(state.projects[0].milestones[0].reviewEnd + 1n);
+  await page.getByText("Technical details", { exact: true }).click();
   await page
     .getByRole("button", { name: "Refresh project", exact: true })
     .click();
-  await confirm(page, "Release after review timeout");
+  await confirm(page, "Release payment after review period");
   await expect(page.getByText("Completed", { exact: true })).toBeVisible();
   expect(state.writes).toEqual(["releaseAfterReviewTimeout"]);
 });
@@ -292,16 +275,16 @@ for (const stateValue of [2, 3])
         exact: true,
       }),
     ).toHaveCount(0);
-    await page.evaluate(
-      (address) => window.__testWallet.account(address),
-      accountB,
-    );
+    await switchAccount(page, accountB);
+    await expect(
+      page.getByRole("heading", { name: "Milestones" }),
+    ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Submit milestone", exact: true }),
     ).toHaveCount(0);
     await expect(
       page.getByRole("button", {
-        name: "Release after review timeout",
+        name: "Release payment after review period",
         exact: true,
       }),
     ).toHaveCount(0);
@@ -311,7 +294,7 @@ test("wallet transaction rejection never deposits tokens", async ({ page }) => {
   const state = escrowRpc();
   await openProject(page, state);
   state.reject();
-  await confirm(page, "1. Approve exact mUSD allowance");
+  await confirm(page, "1. Approve mUSD");
   await expect(
     page.getByText("Request rejected in your wallet. Nothing was confirmed.", {
       exact: true,
@@ -327,7 +310,9 @@ test("reverted receipt is not displayed as confirmed funding", async ({
   await openProject(page, state);
   state.revert();
   await confirm(page, "2. Fund escrow");
-  await expect(page.getByText("reverted", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Transaction failed", { exact: true }),
+  ).toBeVisible();
   expect(state.projects[0].remaining).toBe(0n);
   expect(state.projects[0].state).toBe(0);
 });
@@ -335,14 +320,19 @@ test("creation confirms receipt project ID and labels metadata as session-only",
   page,
 }) => {
   const state = escrowRpc({ empty: true });
-  await installWallet(page, { forwardRpc: true });
+  await installWallet(page, { forwardRpc: true, persistAuthorization: true });
+  await installAuth(page);
   await state.install(page);
-  await page.goto("/projects/new");
-  await connectWallet(page);
-  await page.keyboard.press("Escape");
-  await expect(
-    page.getByRole("button", { name: "Manage wallet", exact: true }).first(),
-  ).toBeVisible();
+  // No persistent metadata store is available: details stay session-only.
+  await page.route("**/api/projects/**", (route) =>
+    route.request().method() === "PUT"
+      ? route.fulfill({
+          status: 503,
+          json: { error: { message: "Isolated metadata unavailable" } },
+        })
+      : route.fallback(),
+  );
+  await signIn(page, "/projects/new");
   await page.getByLabel("Project name").fill("Browser agreement");
   await page.getByLabel("Scope of work").fill("Session-only scope");
   await page.getByLabel("Freelancer wallet address").fill(accountB);
@@ -358,8 +348,9 @@ test("creation confirms receipt project ID and labels metadata as session-only",
   await expect(
     page.getByRole("heading", { name: "Browser agreement", exact: true }),
   ).toBeVisible();
+  await page.getByText("Technical details", { exact: true }).click();
   await expect(
-    page.getByText(/Descriptive metadata exists only in this browser session/),
+    page.getByText("This browser session only", { exact: true }),
   ).toBeVisible();
   expect(state.writes).toEqual(["createProject"]);
   expect(state.projects[0].state).toBe(0);
@@ -368,6 +359,8 @@ test("creation confirms receipt project ID and labels metadata as session-only",
     page.getByRole("heading", { name: "Project #0", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("main").getByText(/Session metadata is unavailable/),
+    page.getByText("No saved description for this project."),
   ).toBeVisible();
+  await page.getByText("Technical details", { exact: true }).click();
+  await expect(page.getByText("Not available", { exact: true })).toBeVisible();
 });

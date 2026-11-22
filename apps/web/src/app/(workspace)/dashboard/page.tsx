@@ -1,3 +1,3 @@
-import { Dashboard } from "@/components/dashboard";
+import { Overview } from "@/components/overview";
 export const metadata = { title: "Overview" };
-export default Dashboard;
+export default Overview;

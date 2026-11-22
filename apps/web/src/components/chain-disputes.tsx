@@ -1,116 +1,152 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { Gavel, Clock3, Coins, FileCheck2 } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { useWalletCases } from "@/lib/blockchain/hooks/use-arbitration";
-import { caseActions, caseRole, caseStage } from "@/lib/blockchain/arbitration";
+import {
+  caseActions,
+  caseRole,
+  caseStage,
+  VOTES,
+} from "@/lib/blockchain/arbitration";
 import { chainDate } from "@/lib/blockchain/projects";
-import { describeError, shortenAddress } from "@/lib/blockchain/errors";
+import { describeError } from "@/lib/blockchain/errors";
+import { timeUntil } from "@/lib/format";
 import {
   Button,
   Card,
+  CardFooter,
   CardHeading,
   DataTable,
   EmptyState,
+  LoadingRow,
   PageHeading,
   StatusBadge,
 } from "./ui";
-import { StatCard } from "./stats";
 import { Money } from "./money";
 
-export function ChainDisputes({
-  dashboard = false,
-  jurorOnly = false,
-}: {
-  dashboard?: boolean;
-  jurorOnly?: boolean;
-}) {
+const FILTERS = [
+  "All cases",
+  "Needs action",
+  "Response window",
+  "Voting open",
+  "Ready to finalize",
+  "Finalized",
+] as const;
+const roleText = {
+  Client: "Client",
+  Freelancer: "Freelancer",
+  Juror: "Juror",
+  Viewer: "Viewer",
+};
+export function ChainDisputes({ jurorOnly = false }: { jurorOnly?: boolean }) {
   const data = useWalletCases();
-  const [filter, setFilter] = useState("All cases");
+  const [filter, setFilter] = useState<(typeof FILTERS)[number]>("All cases");
   const account = data.deployment.address;
   const items = data.cases.filter(
     (c) => !jurorOnly || caseRole(c.dispute, account!) === "Juror",
   );
-  const rows = items.filter(
-    (c) => filter === "All cases" || caseStage(c.dispute, data.now) === filter,
+  const needsAction = (c: (typeof items)[number]) => {
+    const a = caseActions(c.dispute, account!, data.now, c.vote, c.claimable);
+    return a.respond || a.vote || a.finalize || a.claim;
+  };
+  const rows = items.filter((c) =>
+    filter === "All cases"
+      ? true
+      : filter === "Needs action"
+        ? needsAction(c)
+        : caseStage(c.dispute, data.now) === filter,
   );
-  const loaded = data.deployment.readable && data.isSuccess;
-  const actions = items.map((c) =>
-    caseActions(c.dispute, account!, data.now, c.vote, c.claimable),
+  const table = (
+    <DataTable
+      caption={jurorOnly ? "Juror assignments" : "On-chain disputes"}
+      rows={rows}
+      rowKey={(c) => String(c.id)}
+      columns={[
+        {
+          title: "Case",
+          render: (c) => (
+            <div>
+              <Link className="row-title" href={`/disputes/${c.id}`}>
+                Dispute #{c.id.toString()}
+              </Link>
+              <p className="row-subtitle">
+                Project #{c.dispute.projectId.toString()} · Milestone{" "}
+                {Number(c.dispute.milestoneIndex) + 1} · You:{" "}
+                {roleText[caseRole(c.dispute, account!)]}
+              </p>
+            </div>
+          ),
+        },
+        {
+          title: "Stage",
+          render: (c) => (
+            <StatusBadge status={caseStage(c.dispute, data.now)} />
+          ),
+        },
+        {
+          title: "Amount",
+          render: (c) => (
+            <div>
+              <Money amount={c.dispute.milestoneAmount} />
+              {c.claimable > 0n && (
+                <p className="small text-muted">
+                  Reward to claim <Money amount={c.claimable} />
+                </p>
+              )}
+              {c.claimed && (
+                <p className="small text-muted">Your reward claimed</p>
+              )}
+            </div>
+          ),
+        },
+        {
+          title: "Deadline / outcome",
+          render: (c) => {
+            const stage = caseStage(c.dispute, data.now);
+            return (
+              <span className="small text-muted">
+                {c.dispute.status === 2
+                  ? c.dispute.fallbackApplied
+                    ? "50/50 fallback"
+                    : VOTES[c.dispute.ruling]
+                  : stage === "Response window"
+                    ? `Response ${timeUntil(c.dispute.responseDeadline, data.now)}`
+                    : stage === "Voting open"
+                      ? `Voting ${timeUntil(c.dispute.votingDeadline, data.now)}`
+                      : `Voting closed ${chainDate(c.dispute.votingDeadline)}`}
+              </span>
+            );
+          },
+        },
+      ]}
+    />
   );
   return (
     <>
-      {!dashboard && !jurorOnly && (
+      {!jurorOnly && (
         <PageHeading
           title="Disputes"
-          description="Your client, freelancer and assigned-juror cases on the verified local deployment."
+          description="Cases on your projects and cases you’re assigned to as a juror."
         />
       )}
-      {(dashboard || !jurorOnly) && (
-        <div className="stats-grid mt-5">
-          <StatCard
-            icon={Gavel}
-            label="Active disputes loaded"
-            value={
-              loaded ? items.filter((c) => c.dispute.status === 1).length : "—"
-            }
-            note="Associated with the connected wallet"
+      <Card label={jurorOnly ? "Your assignments" : "Disputes"}>
+        {jurorOnly && (
+          <CardHeading
+            title="Your assignments"
+            description="Cases you were selected to judge. Each one locks 100 mUSD of your stake until it is finalized."
           />
-          <StatCard
-            icon={Clock3}
-            label="Awaiting your response"
-            value={loaded ? actions.filter((a) => a.respond).length : "—"}
-            note="Other participants may respond once"
-          />
-          <StatCard
-            icon={FileCheck2}
-            label="Assignments awaiting your vote"
-            value={loaded ? actions.filter((a) => a.vote).length : "—"}
-            note="Assigned, unvoted and inside voting time"
-          />
-          <StatCard
-            icon={Gavel}
-            label="Finalizable disputes loaded"
-            value={loaded ? actions.filter((a) => a.finalize).length : "—"}
-            note="Anyone can finalize after voting closes"
-          />
-          <StatCard
-            icon={Coins}
-            label="Unclaimed rewards loaded"
-            value={
-              loaded ? (
-                <Money amount={items.reduce((n, c) => n + c.claimable, 0n)} />
-              ) : (
-                "—"
-              )
-            }
-            note="Actual per-case claimableReward reads"
-          />
-        </div>
-      )}
-      <Card className="mt-5">
-        <CardHeading
-          title={
-            jurorOnly ? "Your juror assignments & rewards" : "On-chain disputes"
-          }
-          description="Twenty candidate IDs per page; counts and rewards cover loaded cases only."
-        />
-        <div className="toolbar">
+        )}
+        <div className={jurorOnly ? "toolbar mt-3" : "toolbar"}>
           <div
-            className="tabs"
+            className="segmented"
             role="group"
             aria-label="Filter on-chain disputes"
           >
-            {[
-              "All cases",
-              "Response window",
-              "Voting open",
-              "Ready to finalize",
-              "Finalized",
-            ].map((stage) => (
+            {FILTERS.map((stage) => (
               <button
                 key={stage}
-                className={`tab ${stage === filter ? "active" : ""}`}
+                type="button"
                 aria-pressed={stage === filter}
                 onClick={() => setFilter(stage)}
               >
@@ -121,120 +157,72 @@ export function ChainDisputes({
         </div>
         {!data.deployment.readable ? (
           <EmptyState
-            title="Verify your local connection"
-            description="Case reads require a connected wallet and verified deployment. Sample cases are not substituted."
+            title="Waiting for the local network"
+            description="Disputes load once your wallet and the contracts are verified."
           />
         ) : data.error ? (
           <EmptyState
-            title="Dispute discovery failed"
+            title="Couldn’t load disputes"
             description={describeError(data.error).message}
+            action={
+              <Button variant="secondary" onClick={() => void data.refetch()}>
+                Try again
+              </Button>
+            }
           />
         ) : data.isPending ? (
-          <div role="status" className="empty-state">
-            Loading on-chain disputes…
-          </div>
+          <LoadingRow label="Loading on-chain disputes…" />
         ) : !rows.length ? (
           <EmptyState
-            title="No matching on-chain disputes loaded"
+            title={
+              items.length
+                ? "No disputes match this filter"
+                : jurorOnly
+                  ? "No assignments yet"
+                  : "No disputes"
+            }
             description={
               data.hasNextPage
-                ? "Continue scanning earlier case IDs to discover older cases and rewards."
-                : "No case in this filter involves the connected wallet. No sample outcome or reward is substituted."
+                ? "Load earlier disputes to keep looking."
+                : items.length
+                  ? "Try another filter."
+                  : jurorOnly
+                    ? "When you’re eligible, you’ll be assigned to cases in rotation. They’ll appear here."
+                    : "Disputes on your projects, or cases you’re assigned to as a juror, will appear here."
             }
           />
         ) : (
-          <DataTable
-            caption="On-chain disputes"
-            rows={dashboard ? rows.slice(0, 5) : rows}
-            rowKey={(c) => String(c.id)}
-            columns={[
-              {
-                title: "Case / role",
-                render: (c) => (
-                  <div>
-                    <Link className="project-name" href={`/disputes/${c.id}`}>
-                      Dispute #{c.id.toString()}
-                    </Link>
-                    <p className="project-subtitle">
-                      Project #{c.dispute.projectId.toString()} · Milestone{" "}
-                      {c.dispute.milestoneIndex.toString()} (index) ·{" "}
-                      {caseRole(c.dispute, account!)}
-                    </p>
-                    <p
-                      className="small text-muted"
-                      title={`${c.dispute.client} / ${c.dispute.freelancer}`}
-                    >
-                      Client {shortenAddress(c.dispute.client)} · Freelancer{" "}
-                      {shortenAddress(c.dispute.freelancer)}
-                    </p>
-                  </div>
-                ),
-              },
-              {
-                title: "Stage / opened",
-                render: (c) => (
-                  <div>
-                    <StatusBadge status={caseStage(c.dispute, data.now)} />
-                    <p className="small text-muted mt-2">
-                      Opened {chainDate(c.dispute.openedAt)}
-                    </p>
-                  </div>
-                ),
-              },
-              {
-                title: "Amount / reward",
-                render: (c) => (
-                  <div>
-                    <Money amount={c.dispute.milestoneAmount} />
-                    {c.claimable > 0n && (
-                      <p className="small">
-                        Claimable <Money amount={c.claimable} />
-                      </p>
-                    )}
-                    {c.claimed && <p className="small">Your reward claimed</p>}
-                  </div>
-                ),
-              },
-              {
-                title: "Deadlines / outcome",
-                render: (c) => (
-                  <p className="small text-muted">
-                    {c.dispute.status === 2
-                      ? `Finalized · ${c.dispute.fallbackApplied ? "50/50 fallback" : ["No ruling", "Freelancer wins", "Client wins", "Split"][c.dispute.ruling]}`
-                      : `Response ${chainDate(c.dispute.responseDeadline)} · Voting ${chainDate(c.dispute.votingDeadline)}`}
-                  </p>
-                ),
-              },
-            ]}
-          />
+          table
         )}
-        <div className="card-body card-divider flex flex-wrap items-center gap-3">
-          <span className="small text-muted">
-            {data.scanned.toString()} candidate IDs scanned · {items.length}{" "}
-            relevant cases loaded
-          </span>
-          {data.hasNextPage && (
-            <Button
-              variant="secondary"
-              disabled={data.isFetching || !data.deployment.ready}
-              onClick={() => void data.fetchNextPage()}
-            >
-              Load earlier disputes
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            disabled={data.isFetching || !data.deployment.ready}
-            onClick={() => void data.refetch()}
-          >
-            Refresh disputes
-          </Button>
-          {dashboard && (
-            <Link className="text-link" href="/disputes">
-              View all loaded cases
-            </Link>
-          )}
-        </div>
+        {data.deployment.readable && (
+          <CardFooter>
+            <span>
+              {items.length} {items.length === 1 ? "case" : "cases"}
+              {data.hasNextPage ? " in the most recent IDs" : ""}
+            </span>
+            <span className="ml-auto button-row">
+              {data.hasNextPage && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={data.isFetching || !data.deployment.ready}
+                  onClick={() => void data.fetchNextPage()}
+                >
+                  Load earlier disputes
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={data.isFetching || !data.deployment.ready}
+                onClick={() => void data.refetch()}
+              >
+                <RefreshCw size={13} aria-hidden="true" />
+                Refresh disputes
+              </Button>
+            </span>
+          </CardFooter>
+        )}
       </Card>
     </>
   );

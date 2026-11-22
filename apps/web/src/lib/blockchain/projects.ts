@@ -171,10 +171,18 @@ export function validEvidenceHash(value: string): value is Hex {
 export function chainDate(value: bigint) {
   if (!value) return "Not set";
   if (value > 8_640_000_000_000n) return `${value} Unix seconds`;
-  return new Date(Number(value) * 1000)
-    .toISOString()
-    .replace("T", " ")
-    .replace(".000Z", " UTC");
+  // Contract times are UTC chain timestamps; label them explicitly as UTC.
+  return (
+    new Intl.DateTimeFormat("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+      timeZone: "UTC",
+    }).format(new Date(Number(value) * 1000)) + " UTC"
+  );
 }
 export function projectActions(
   project: ChainProject,

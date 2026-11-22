@@ -1,3 +1,5 @@
-import { DisputeList } from "@/components/dispute-list";
+import { ChainDisputes } from "@/components/chain-disputes";
 export const metadata = { title: "Disputes" };
-export default DisputeList;
+export default function DisputesPage() {
+  return <ChainDisputes />;
+}

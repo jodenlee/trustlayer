@@ -1,5 +1,21 @@
 "use client";
+import { CheckCircle2, XCircle } from "lucide-react";
 import type { TransactionLifecycle } from "@/lib/blockchain/transactions";
+import { Disclosure, Hash, Spinner } from "./ui";
+
+const titles: Record<string, string> = {
+  validating: "Checking wallet and network…",
+  "awaiting-signature": "Confirm in your wallet",
+  confirming: "Waiting for confirmation…",
+  submitted: "Submitted",
+  confirmed: "Confirmed",
+  reverted: "Transaction failed",
+  failed: "Not completed",
+  unconfirmed: "Confirmation unknown",
+  rejected: "Declined in wallet",
+  cancelled: "Cancelled by a replacement",
+  replaced: "Replaced by another transaction",
+};
 /** Actual signing and receipt state shared by escrow workflows. */
 export function TransactionFeedback({
   state,
@@ -7,39 +23,57 @@ export function TransactionFeedback({
   state: TransactionLifecycle;
 }) {
   if (state.phase === "idle") return null;
+  const pending = ["validating", "awaiting-signature", "confirming"].includes(
+    state.phase,
+  );
+  const tone =
+    state.phase === "confirmed"
+      ? "success"
+      : ["reverted", "failed", "rejected", "cancelled", "replaced"].includes(
+            state.phase,
+          )
+        ? "failed"
+        : "";
   return (
-    <div role="status" aria-live="polite" className="transaction-feedback">
-      <strong>{state.phase.replaceAll("-", " ")}</strong>
-      {state.phase === "validating" && (
-        <p className="small mt-2">
-          Checking the wallet, local network and deployed contracts…
-        </p>
-      )}
+    <div role="status" aria-live="polite" className={`tx-feedback ${tone}`}>
+      <div className="tx-feedback-head">
+        {pending ? (
+          <Spinner />
+        ) : tone === "success" ? (
+          <CheckCircle2 size={16} aria-hidden="true" />
+        ) : tone === "failed" ? (
+          <XCircle size={16} aria-hidden="true" />
+        ) : null}
+        <span>
+          {state.phase === "unconfirmed" && state.errorKind === "nonce"
+            ? "Stuck: wallet nonce is ahead of the chain"
+            : (titles[state.phase] ?? state.phase)}
+        </span>
+      </div>
       {state.phase === "awaiting-signature" && (
-        <p className="small mt-2">
-          Preparing the transaction for MetaMask or your connected wallet.
-          Confirm it when prompted; if no popup appears, open your wallet
+        <p className="text-muted">
+          Confirm it when prompted. If no popup appears, open your wallet
           extension.
         </p>
       )}
       {state.phase === "confirming" && (
-        <p className="small mt-2">
-          Transaction submitted. Waiting for its on-chain receipt; do not submit
-          it again.
-        </p>
-      )}
-      {state.hash && (
-        <p className="wallet-address">
-          <span className="small text-muted">Transaction hash </span>
-          <code>{state.hash}</code>
+        <p className="text-muted">
+          Submitted to the network. Don’t submit it again while waiting.
         </p>
       )}
       {state.phase === "submitted" && (
-        <p className="small">Submitted to the network; not confirmed.</p>
+        <p className="text-muted">Submitted to the network; not confirmed.</p>
       )}
-      {state.message && <p className="small mt-2">{state.message}</p>}
+      {state.message && <p className="text-muted">{state.message}</p>}
       {state.refreshWarning && (
-        <p className="small mt-2">{state.refreshWarning}</p>
+        <p className="text-muted">{state.refreshWarning}</p>
+      )}
+      {state.hash && (
+        <Disclosure plain summary="Transaction details">
+          <p className="small text-muted">
+            Transaction hash <Hash value={state.hash} full />
+          </p>
+        </Disclosure>
       )}
     </div>
   );

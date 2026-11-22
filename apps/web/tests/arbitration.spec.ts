@@ -5,12 +5,8 @@ import {
   jurorB,
   outsider,
 } from "../test-support/arbitration-rpc";
-import {
-  installWallet,
-  connectWallet,
-  accountA,
-  accountB,
-} from "./wallet-fixture";
+import { installWallet, accountA, accountB } from "./wallet-fixture";
+import { installAuth, signIn, switchAccount } from "./auth-fixture";
 import type { Address } from "viem";
 const hash = `0x${"a".repeat(64)}`;
 async function open(
@@ -19,19 +15,19 @@ async function open(
   url = "/disputes/0",
   actor: Address = accountA,
 ) {
-  await installWallet(page, { forwardRpc: true });
+  await installWallet(page, { forwardRpc: true, account: actor });
+  await installAuth(page);
   await state.install(page);
-  await page.goto(url);
-  if (actor !== accountA)
-    await page.evaluate(
-      (address) => window.__testWallet.account(address),
-      actor,
-    );
-  await connectWallet(page);
-  await page.keyboard.press("Escape");
-  await expect(
-    page.getByText("On-chain workspace", { exact: true }),
-  ).toBeVisible();
+  await signIn(page, url);
+}
+/** Dispute opening is a collapsed, secondary path on the milestone. */
+async function openingPanel(page: Page) {
+  await page
+    .locator("summary", {
+      hasText: "Problem with this milestone? Open a dispute",
+    })
+    .click();
+  await expect(page.getByLabel("Opening evidence hash")).toBeVisible();
 }
 async function review(page: Page, title: string) {
   await page.getByRole("button", { name: title, exact: true }).click();
@@ -57,16 +53,24 @@ for (const actor of [accountA, accountB])
   }) => {
     const state = arbitrationRpc();
     await open(page, state, "/projects/0", actor);
+    await openingPanel(page);
     await page.getByLabel("Opening evidence hash").fill(hash);
     await confirmed(page, "Approve 15 mUSD dispute fee");
     expect(state.cases).toHaveLength(0);
     expect(state.projects[0].milestones[0].state).toBe(1);
     await review(page, "Open dispute");
     await expect(page).toHaveURL(/\/disputes\/0$/);
-    await expect(page.getByText("Disputed", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("Response window", { exact: true }),
+    ).toBeVisible();
     expect(state.cases[0].opener.toLowerCase()).toBe(actor.toLowerCase());
     expect(state.writes).toEqual(["approve", "openDispute"]);
-    await page.getByRole("link", { name: "View project", exact: true }).click();
+    await page
+      .getByRole("main")
+      .getByRole("link", { name: "Project #0", exact: true })
+      .first()
+      .click();
+    await expect(page.getByText("Disputed", { exact: true })).toBeVisible();
     await expect(
       page.getByRole("link", { name: "View on-chain dispute #0" }),
     ).toBeVisible();
@@ -82,6 +86,7 @@ test("insufficient opener balance prevents approval and fee collection", async (
 }) => {
   const state = arbitrationRpc({ balance: 14_000_000n });
   await open(page, state, "/projects/0");
+  await openingPanel(page);
   await page.getByLabel("Opening evidence hash").fill(hash);
   await expect(
     page.getByRole("button", {
@@ -99,6 +104,7 @@ test("fresh opening preflight prevents duplicate cases and stale review deadline
 }) => {
   const state = arbitrationRpc();
   await open(page, state, "/projects/0");
+  await openingPanel(page);
   await page.getByLabel("Opening evidence hash").fill(hash);
   await confirmed(page, "Approve 15 mUSD dispute fee");
   await page.getByRole("button", { name: "Open dispute", exact: true }).click();
@@ -118,6 +124,7 @@ test("juror shortage fails opening without freezing or paying the fee", async ({
 }) => {
   const state = arbitrationRpc({ jurorsReady: false });
   await open(page, state, "/projects/0");
+  await openingPanel(page);
   await page.getByLabel("Opening evidence hash").fill(hash);
   await confirmed(page, "Approve 15 mUSD dispute fee");
   await review(page, "Open dispute");
@@ -219,11 +226,8 @@ test("participants and unrelated wallets cannot vote or claim assigned rewards",
   state.advance(state.cases[0].responseDeadline);
   await open(page, state);
   await expect(page.getByRole("button", { name: /^Vote:/ })).toHaveCount(0);
-  await page.evaluate(
-    (address) => window.__testWallet.account(address),
-    outsider,
-  );
-  await expect(page.getByText(/Acting as Viewer/)).toBeVisible();
+  await switchAccount(page, outsider);
+  await expect(page.getByText("Viewing only", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /^Vote:/ })).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Claim 4 mUSD reward", exact: true }),
@@ -269,7 +273,7 @@ for (const [ruling, bps, name, net] of [
     await confirmed(page, "Finalize dispute");
     await expect(
       page
-        .getByTestId("case-settlement")
+        .getByLabel("Case status")
         .getByRole("heading", { name, exact: true }),
     ).toBeVisible();
     await expect(
@@ -279,6 +283,7 @@ for (const [ruling, bps, name, net] of [
         .locator(".."),
     ).toContainText(net);
     expect(state.cases[0].freelancerBps).toBe(bps);
+    await page.getByText("Technical details", { exact: true }).click();
     await expect(
       page.getByText("Unlocked for this case", { exact: true }),
     ).toBeVisible();
@@ -339,15 +344,9 @@ test("discovery includes a juror and removes unrelated cases after wallet switch
   await expect(
     page.getByRole("link", { name: "Dispute #0", exact: true }),
   ).toBeVisible();
-  await page.evaluate(
-    (address) => window.__testWallet.account(address),
-    outsider,
-  );
+  await switchAccount(page, outsider);
   await expect(
-    page.getByRole("heading", {
-      name: "No matching on-chain disputes loaded",
-      exact: true,
-    }),
+    page.getByRole("heading", { name: "No disputes", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("link", { name: "Dispute #0", exact: true }),
@@ -382,18 +381,23 @@ test("changing wallets invalidates an open vote review", async ({ page }) => {
   state.advance(state.cases[0].responseDeadline);
   await open(page, state, "/disputes/0", jurorA);
   await page.getByRole("button", { name: "Vote: Split", exact: true }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Vote: Split", exact: true }),
+  ).toBeVisible();
   await page.evaluate(
     (address) => window.__testWallet.account(address),
     jurorB,
   );
+  // The session is revoked: the review dialog disappears and nothing is sent.
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fdisputes%2F0&ended=1/);
   await expect(
-    page
-      .getByRole("dialog")
-      .getByRole("button", { name: "Confirm in wallet", exact: true }),
-  ).toBeDisabled();
-  await expect(
-    page.getByRole("dialog").getByText(/wallet or deployment changed/),
-  ).toBeVisible();
+    page.getByRole("button", { name: "Confirm in wallet", exact: true }),
+  ).toHaveCount(0);
+  expect(
+    await page.evaluate(() =>
+      window.__testWallet.calls.includes("eth_sendTransaction"),
+    ),
+  ).toBe(false);
   expect(state.writes).toEqual([]);
 });
 test("nonexistent numeric dispute ID has a useful unavailable state", async ({
@@ -416,8 +420,11 @@ test("pending vote keeps its hash through verification and cannot be submitted t
   state.defer(true);
   await open(page, state, "/disputes/0", jurorA);
   const dialog = await review(page, "Vote: Split");
-  await expect(dialog.getByText("confirming", { exact: true })).toBeVisible();
-  await expect(dialog.locator("code")).toHaveText(/^0x[\da-f]{64}$/i);
+  await expect(
+    dialog.getByText("Waiting for confirmation…", { exact: true }),
+  ).toBeVisible();
+  await dialog.getByText("Transaction details", { exact: true }).click();
+  await expect(dialog.locator(".hash-full")).toHaveText(/^0x[\da-f]{64}$/i);
   await page.evaluate(() =>
     document.dispatchEvent(new Event("visibilitychange")),
   );

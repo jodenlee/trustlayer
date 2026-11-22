@@ -1,4 +1,5 @@
 "use client";
+import { RefreshCw } from "lucide-react";
 import { useJuror } from "@/lib/blockchain/hooks/use-arbitration";
 import { parseMUSD } from "@/lib/format";
 import { executeJurorAction } from "@/lib/blockchain/arbitration-actions";
@@ -6,10 +7,12 @@ import { describeError } from "@/lib/blockchain/errors";
 import {
   Button,
   Card,
+  CardBody,
   CardHeading,
   EmptyState,
   Field,
   Input,
+  LoadingRow,
   PageHeading,
   StatusBadge,
 } from "./ui";
@@ -37,56 +40,45 @@ export function ChainJuror() {
   return (
     <>
       <PageHeading
-        title="Your juror workspace"
-        description="Manage your own stake and review public on-chain assignments. Selection rotates deterministically; it is not random."
+        eyebrow={
+          view && (
+            <StatusBadge status={view.eligible ? "Eligible" : "Not eligible"} />
+          )
+        }
+        title="Jury"
+        description="Stake mUSD to be assigned disputes in rotation, vote on the outcome, and earn 4 mUSD per case."
       />
-      <Card>
-        <CardHeading
-          title="Registration & collateral"
-          action={
-            view && (
-              <StatusBadge
-                status={view.eligible ? "Eligible" : "Not eligible"}
-              />
-            )
-          }
-        />
+      <div className="stack">
         {!view ? (
-          <EmptyState
-            title={
-              !read.deployment.ready
-                ? "Verify your local connection"
-                : read.error
-                  ? "Juror reads failed"
-                  : "Loading juror stake…"
-            }
-            description={
-              read.error
-                ? describeError(read.error).message
-                : "Actual wallet stake is shown after verification; no sample balance is substituted."
-            }
-            action={
-              <Button variant="secondary" onClick={() => void read.refetch()}>
-                Retry juror reads
-              </Button>
-            }
-          />
+          <Card>
+            {read.deployment.ready && !read.error ? (
+              <LoadingRow label="Loading juror stake…" />
+            ) : (
+              <EmptyState
+                title={
+                  !read.deployment.ready
+                    ? "Waiting for the local network"
+                    : "Couldn’t load your juror account"
+                }
+                description={
+                  read.error
+                    ? describeError(read.error).message
+                    : "Your stake loads once your wallet and the contracts are verified."
+                }
+                action={
+                  <Button
+                    variant="secondary"
+                    onClick={() => void read.refetch()}
+                  >
+                    Retry juror reads
+                  </Button>
+                }
+              />
+            )}
+          </Card>
         ) : (
-          <div className="card-body pt-0!">
-            <p className="wallet-address">
-              Acting juror wallet: {read.deployment.address}
-            </p>
-            <dl className="summary-list mt-4">
-              <div>
-                <dt>Registered</dt>
-                <dd>{view.info.registered ? "Yes" : "No"}</dd>
-              </div>
-              <div>
-                <dt>Minimum unlocked for a new assignment</dt>
-                <dd>
-                  <Money amount={view.minimum} />
-                </dd>
-              </div>
+          <>
+            <dl className="figures" aria-label="Juror stake">
               <div>
                 <dt>Deposited stake</dt>
                 <dd data-testid="juror-deposited">
@@ -94,163 +86,191 @@ export function ChainJuror() {
                 </dd>
               </div>
               <div>
-                <dt>Locked stake</dt>
+                <dt>Locked in cases</dt>
                 <dd data-testid="juror-locked">
                   <Money amount={view.info.lockedStake} />
                 </dd>
               </div>
               <div>
-                <dt>Available stake</dt>
+                <dt>Available</dt>
                 <dd data-testid="juror-available">
                   <Money amount={view.info.availableStake} />
                 </dd>
               </div>
               <div>
-                <dt>Active assignments</dt>
+                <dt>Active cases</dt>
                 <dd>{view.info.activeAssignments.toString()}</dd>
-              </div>
-              <div>
-                <dt>Wallet mUSD balance</dt>
-                <dd>
-                  <Money amount={view.balance} />
-                </dd>
-              </div>
-              <div>
-                <dt>Registry allowance</dt>
-                <dd>
-                  <Money amount={view.allowance} />
-                </dd>
               </div>
             </dl>
             {!view.info.registered ? (
-              <div className="mt-5">
-                <ReviewedAction
-                  title="Register as juror"
-                  disabled={read.isFetching}
-                  submit={(context) => executeJurorAction(context, "register")}
-                >
-                  <p>
-                    Register this wallet once. Registration transfers no mUSD
-                    and does not make you eligible until at least 100 mUSD is
-                    unlocked in the registry. Local ETH is required for gas.
-                  </p>
-                </ReviewedAction>
+              <div className="next-step" aria-label="Become a juror">
+                <span className="eyebrow-label">GET STARTED</span>
+                <h2>Register as a juror</h2>
+                <p>
+                  Registration is free (gas only) and moves no tokens. You
+                  become eligible once at least <Money amount={view.minimum} />{" "}
+                  of stake is available, and each case you’re assigned locks
+                  that amount until the case is finalized.
+                </p>
+                <div className="button-row">
+                  <ReviewedAction
+                    title="Register as juror"
+                    disabled={read.isFetching}
+                    submit={(context) =>
+                      executeJurorAction(context, "register")
+                    }
+                  >
+                    <p>
+                      Register this wallet once. This transfers no mUSD. You
+                      become eligible after depositing at least 100 mUSD of
+                      stake.
+                    </p>
+                  </ReviewedAction>
+                </div>
               </div>
             ) : (
-              <div className="form-grid mt-5">
-                <div className="space-y-3">
-                  <Field
-                    id="stake-deposit"
-                    label="Deposit amount (mUSD)"
-                    hint="Positive amount, up to six decimal places. Approval and deposit are separate transactions."
-                  >
-                    <Input
+              <div className="grid-2">
+                <Card label="Add stake">
+                  <CardHeading
+                    title="Add stake"
+                    description={
+                      <>
+                        Wallet balance <Money amount={view.balance} />
+                      </>
+                    }
+                  />
+                  <CardBody className="stack-sm">
+                    <Field
                       id="stake-deposit"
-                      inputMode="decimal"
-                      value={deposit}
-                      onChange={(e) => setDeposit(e.target.value)}
-                    />
-                  </Field>
-                  {amount === null ? (
-                    <p className="small text-muted">
-                      Enter a positive amount with at most six decimal places.
-                    </p>
-                  ) : amount > view.balance ? (
-                    <p role="alert" className="form-error">
-                      Insufficient mUSD balance for this deposit.
-                    </p>
-                  ) : null}
-                  <ReviewedAction
-                    title={
-                      amount !== null && view.allowance >= amount
-                        ? "Deposit stake"
-                        : "Approve exact stake allowance"
-                    }
-                    disabled={
-                      read.isFetching ||
-                      amount === null ||
-                      amount > view.balance
-                    }
-                    details={{ amount: amount ?? undefined }}
-                    submit={(context) =>
-                      executeJurorAction(
-                        context,
-                        amount !== null && view.allowance >= amount
-                          ? "deposit"
-                          : "approveStake",
-                        amount!,
-                      )
-                    }
-                  >
-                    <p>
-                      {amount !== null && view.allowance >= amount
-                        ? "Deposit your approved tokens into juror custody. At least 100 mUSD unlocked is needed for each new assignment."
-                        : "Approve only the entered amount to JurorRegistry. This does not deposit tokens; wait for confirmation, then review the separate deposit."}
-                    </p>
-                    <p className="mt-3">
-                      Amount <Money amount={amount ?? 0n} />
-                    </p>
-                  </ReviewedAction>
-                </div>
-                <div className="space-y-3">
-                  <Field
-                    id="stake-withdrawal"
-                    label="Withdraw amount (mUSD)"
-                    hint="Only your available stake can be withdrawn; locked collateral is unavailable until finalization."
-                  >
-                    <Input
-                      id="stake-withdrawal"
-                      inputMode="decimal"
-                      value={withdraw}
-                      onChange={(e) => setWithdraw(e.target.value)}
-                    />
-                  </Field>
-                  {withdrawal !== null &&
-                    withdrawal > view.info.availableStake && (
-                      <p role="alert" className="form-error">
-                        Withdrawal exceeds unlocked stake.
+                      label="Deposit amount (mUSD)"
+                      hint="Up to six decimal places. Approval and deposit are two separate confirmations."
+                    >
+                      <Input
+                        id="stake-deposit"
+                        inputMode="decimal"
+                        value={deposit}
+                        onChange={(e) => setDeposit(e.target.value)}
+                      />
+                    </Field>
+                    {amount === null ? (
+                      <p className="small text-muted">
+                        Enter a positive amount with at most six decimal places.
                       </p>
-                    )}
-                  <ReviewedAction
-                    title="Withdraw unlocked stake"
-                    disabled={
-                      read.isFetching ||
-                      withdrawal === null ||
-                      withdrawal > view.info.availableStake
+                    ) : amount > view.balance ? (
+                      <p role="alert" className="form-error">
+                        Insufficient mUSD balance for this deposit.
+                      </p>
+                    ) : null}
+                    <div className="button-row">
+                      <ReviewedAction
+                        title={
+                          amount !== null && view.allowance >= amount
+                            ? "Deposit stake"
+                            : "Approve exact stake allowance"
+                        }
+                        disabled={
+                          read.isFetching ||
+                          amount === null ||
+                          amount > view.balance
+                        }
+                        details={{ amount: amount ?? undefined }}
+                        submit={(context) =>
+                          executeJurorAction(
+                            context,
+                            amount !== null && view.allowance >= amount
+                              ? "deposit"
+                              : "approveStake",
+                            amount!,
+                          )
+                        }
+                      >
+                        <p>
+                          {amount !== null && view.allowance >= amount
+                            ? "Deposit your approved mUSD as juror stake. At least 100 mUSD available is needed for each new assignment."
+                            : "Allow the juror registry to take exactly this amount. This doesn’t deposit anything yet; once it’s confirmed, review the deposit separately."}
+                        </p>
+                        <p className="mt-3">
+                          Amount <Money amount={amount ?? 0n} />
+                        </p>
+                      </ReviewedAction>
+                    </div>
+                  </CardBody>
+                </Card>
+                <Card label="Withdraw stake">
+                  <CardHeading
+                    title="Withdraw stake"
+                    description={
+                      <>
+                        Available now{" "}
+                        <Money amount={view.info.availableStake} />
+                      </>
                     }
-                    details={{ amount: withdrawal ?? undefined }}
-                    submit={(context) =>
-                      executeJurorAction(context, "withdraw", withdrawal!)
-                    }
-                  >
-                    <p>
-                      Withdraw <Money amount={withdrawal ?? 0n} /> to your own
-                      wallet. This may make you ineligible for new assignments
-                      if remaining unlocked stake is below 100 mUSD. Existing
-                      locked collateral cannot be spent.
-                    </p>
-                  </ReviewedAction>
-                </div>
+                  />
+                  <CardBody className="stack-sm">
+                    <Field
+                      id="stake-withdrawal"
+                      label="Withdraw amount (mUSD)"
+                      hint="Stake locked in open cases can’t be withdrawn until those cases are finalized."
+                    >
+                      <Input
+                        id="stake-withdrawal"
+                        inputMode="decimal"
+                        value={withdraw}
+                        onChange={(e) => setWithdraw(e.target.value)}
+                      />
+                    </Field>
+                    {withdrawal !== null &&
+                      withdrawal > view.info.availableStake && (
+                        <p role="alert" className="form-error">
+                          Withdrawal exceeds unlocked stake.
+                        </p>
+                      )}
+                    <div className="button-row">
+                      <ReviewedAction
+                        variant="secondary"
+                        title="Withdraw unlocked stake"
+                        disabled={
+                          read.isFetching ||
+                          withdrawal === null ||
+                          withdrawal > view.info.availableStake
+                        }
+                        details={{ amount: withdrawal ?? undefined }}
+                        submit={(context) =>
+                          executeJurorAction(context, "withdraw", withdrawal!)
+                        }
+                      >
+                        <p>
+                          Withdraw <Money amount={withdrawal ?? 0n} /> to your
+                          wallet. If less than 100 mUSD remains available, you
+                          won’t receive new assignments. Locked stake isn’t
+                          affected.
+                        </p>
+                      </ReviewedAction>
+                    </div>
+                  </CardBody>
+                </Card>
               </div>
             )}
-            <p className="small text-muted mt-5">
-              Every assignment locks 100 mUSD. A finalized case releases that
-              case’s locks; other cases may still lock collateral. There are no
-              slashing or attendance penalties. Rewards are separate per-case
-              claims below.
-            </p>
-            <Button
-              variant="ghost"
-              className="mt-3"
-              disabled={read.isFetching}
-              onClick={() => void read.refetch()}
-            >
-              Refresh juror balances
-            </Button>
-          </div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="small text-muted">
+                Jurors are selected by deterministic rotation, not at random.
+                There are no penalties for how you vote; every assigned juror
+                can claim 4 mUSD once the case is finalized.
+              </p>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={read.isFetching}
+                onClick={() => void read.refetch()}
+              >
+                <RefreshCw size={13} aria-hidden="true" />
+                Refresh juror balances
+              </Button>
+            </div>
+          </>
         )}
-      </Card>
-      <ChainDisputes jurorOnly />
+        <ChainDisputes jurorOnly />
+      </div>
     </>
   );
 }

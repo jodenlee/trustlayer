@@ -6,6 +6,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { CheckCircle2, X } from "lucide-react";
@@ -16,21 +17,42 @@ import { ReviewedActionProvider } from "./reviewed-action";
 import { AuthProvider } from "./auth-provider";
 import { FileDraftProvider } from "./file-draft-provider";
 
-interface PreviewContext {
-  sample: boolean;
-  setSample: (value: boolean) => void;
-  name: string;
-  setName: (value: string) => void;
+interface UiContext {
+  /** Show every six-decimal mUSD digit instead of trimming trailing zeros. */
   precise: boolean;
   setPrecise: (value: boolean) => void;
   openWallet: () => void;
   toast: (message: string) => void;
 }
-const Context = createContext<PreviewContext | null>(null);
-export function usePreview() {
+const Context = createContext<UiContext | null>(null);
+export function useUi() {
   const context = useContext(Context);
-  if (!context) throw new Error("Preview provider is required");
+  if (!context) throw new Error("UI provider is required");
   return context;
+}
+const PRECISION_KEY = "trustlayer:full-precision";
+// A per-browser display preference only; storage may be unavailable.
+const precisionListeners = new Set<() => void>();
+let precisionFallback = false;
+function readPrecision() {
+  try {
+    return localStorage.getItem(PRECISION_KEY) === "true";
+  } catch {
+    return precisionFallback;
+  }
+}
+function writePrecision(value: boolean) {
+  precisionFallback = value;
+  try {
+    localStorage.setItem(PRECISION_KEY, String(value));
+  } catch {
+    /* keep the in-memory fallback */
+  }
+  precisionListeners.forEach((listener) => listener());
+}
+function subscribePrecision(listener: () => void) {
+  precisionListeners.add(listener);
+  return () => precisionListeners.delete(listener);
 }
 export function Providers({ children }: { children: ReactNode }) {
   return (
@@ -38,17 +60,19 @@ export function Providers({ children }: { children: ReactNode }) {
       <AuthProvider>
         <WorkflowProvider>
           <FileDraftProvider>
-            <PreviewProvider>{children}</PreviewProvider>
+            <UiProvider>{children}</UiProvider>
           </FileDraftProvider>
         </WorkflowProvider>
       </AuthProvider>
     </BlockchainProvider>
   );
 }
-function PreviewProvider({ children }: { children: ReactNode }) {
-  const [sample, setSample] = useState(true);
-  const [name, setName] = useState("Alex Morgan");
-  const [precise, setPrecise] = useState(false);
+function UiProvider({ children }: { children: ReactNode }) {
+  const precise = useSyncExternalStore(
+    subscribePrecision,
+    readPrecision,
+    () => false,
+  );
   const [wallet, setWallet] = useState(false);
   const [message, setMessage] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -58,13 +82,12 @@ function PreviewProvider({ children }: { children: ReactNode }) {
     timer.current = setTimeout(() => setMessage(""), 6000);
   }, []);
   useEffect(() => () => clearTimeout(timer.current), []);
+  const setPrecise = useCallback((value: boolean) => {
+    writePrecision(value);
+  }, []);
   return (
     <Context.Provider
       value={{
-        sample,
-        setSample,
-        name,
-        setName,
         precise,
         setPrecise,
         openWallet: () => setWallet(true),
@@ -81,13 +104,13 @@ function PreviewProvider({ children }: { children: ReactNode }) {
       >
         {message && (
           <div className="toast">
-            <CheckCircle2 size={19} aria-hidden="true" />
+            <CheckCircle2 size={17} aria-hidden="true" />
             <p>{message}</p>
             <button
               aria-label="Dismiss notification"
               onClick={() => setMessage("")}
             >
-              <X size={17} />
+              <X size={16} />
             </button>
           </div>
         )}

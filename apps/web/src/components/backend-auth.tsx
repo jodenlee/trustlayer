@@ -1,68 +1,10 @@
 "use client";
 import { useState, type FormEvent } from "react";
-import { useConnection } from "wagmi";
-import { useQuery } from "@tanstack/react-query";
 import { backendRequest, type BackendProfile } from "@/lib/auth-client";
 import { useBackendAuth } from "./auth-provider";
-import { Button, Card, CardHeading, Field, Input } from "./ui";
+import { useProfile } from "./shell";
+import { Button, Card, CardBody, CardHeading, Field, Input } from "./ui";
 
-export function BackendAuthControl() {
-  const auth = useBackendAuth();
-  const wallet = useConnection();
-  return (
-    <div className="space-y-3 mt-4" aria-label="Backend authentication">
-      <p className="small" aria-live="polite">
-        {auth.session
-          ? "Backend authenticated"
-          : auth.checking
-            ? "Checking backend session…"
-            : "Backend not authenticated"}
-      </p>
-      <p className="small text-muted">
-        Wallet connection and backend sign-in are separate. Sign-in sends no
-        transaction.
-      </p>
-      {!auth.configured && (
-        <p className="small text-muted">
-          Backend setup required. Configure PostgreSQL and apply the Phase 4A
-          migration.
-        </p>
-      )}
-      {auth.session ? (
-        <Button
-          variant="secondary"
-          disabled={auth.busy}
-          onClick={() => void auth.logout()}
-        >
-          Sign out of backend
-        </Button>
-      ) : (
-        <Button
-          variant="secondary"
-          disabled={
-            !wallet.isConnected ||
-            wallet.chainId !== 31337 ||
-            auth.busy ||
-            auth.checking ||
-            !auth.configured
-          }
-          onClick={() => void auth.signIn()}
-        >
-          {auth.busy ? "Confirm sign-in in wallet…" : "Sign in with Ethereum"}
-        </Button>
-      )}
-      {auth.error && (
-        <p
-          role="alert"
-          aria-label="Backend authentication error"
-          className="form-error"
-        >
-          {auth.error}
-        </p>
-      )}
-    </div>
-  );
-}
 function ProfileEditor({
   profile,
   onSaved,
@@ -82,7 +24,7 @@ function ProfileEditor({
     try {
       await backendRequest("/api/profile", "PATCH", { displayName, biography });
       await onSaved();
-      setFeedback("Backend profile saved.");
+      setFeedback("Profile saved.");
     } catch (e) {
       setFeedback(
         e instanceof Error ? e.message : "Profile could not be saved.",
@@ -92,13 +34,12 @@ function ProfileEditor({
     }
   }
   return (
-    <form className="space-y-4 mt-5" onSubmit={save}>
-      <p className="small text-muted">
-        Saved for{" "}
-        <code className="wallet-address">{profile.wallet_address}</code>. Use
-        only non-sensitive profile information.
-      </p>
-      <Field id="backend-display-name" label="Backend display name">
+    <form className="form-stack" onSubmit={save}>
+      <Field
+        id="backend-display-name"
+        label="Display name"
+        hint="Shown to people you work with. Use non-sensitive information only."
+      >
         <Input
           id="backend-display-name"
           required
@@ -107,46 +48,43 @@ function ProfileEditor({
           onChange={(e) => setDisplayName(e.target.value)}
         />
       </Field>
-      <Field id="backend-biography" label="Biography (optional)">
+      <Field id="backend-biography" label="About you (optional)">
         <textarea
-          className="input"
+          className="textarea"
           id="backend-biography"
           maxLength={2000}
           value={biography}
           onChange={(e) => setBiography(e.target.value)}
         />
       </Field>
-      <Button type="submit" disabled={busy}>
-        {busy ? "Saving profile…" : "Save backend profile"}
-      </Button>
-      {feedback && (
-        <p role="status" className="small">
-          {feedback}
-        </p>
-      )}
+      <div className="button-row">
+        <Button type="submit" disabled={busy}>
+          {busy ? "Saving profile…" : "Save profile"}
+        </Button>
+        {feedback && (
+          <p role="status" className="small text-muted">
+            {feedback}
+          </p>
+        )}
+      </div>
     </form>
   );
 }
+/** The signed-in wallet's persistent off-chain profile. */
 export function BackendProfileCard() {
   const auth = useBackendAuth();
-  const profile = useQuery({
-    queryKey: ["backend-profile", auth.session?.address],
-    enabled: !!auth.session,
-    queryFn: () => backendRequest<{ profile: BackendProfile }>("/api/profile"),
-    gcTime: 0,
-  });
+  const profile = useProfile();
   return (
-    <Card>
+    <Card label="Profile">
       <CardHeading
-        title="Wallet-linked profile"
-        description="Persistent backend profile, separate from preview preferences."
+        title="Profile"
+        description="Saved to your wallet-linked account, separate from blockchain data."
       />
-      <div className="card-body pt-0!">
-        <BackendAuthControl />
-        {auth.session && profile.isPending && (
-          <p className="small mt-3">Loading profile…</p>
+      <CardBody>
+        {profile.isPending && (
+          <p className="small text-muted">Loading profile…</p>
         )}
-        {auth.session && profile.error && (
+        {profile.error && (
           <p role="alert" className="form-error">
             {profile.error.message}
           </p>
@@ -158,7 +96,7 @@ export function BackendProfileCard() {
             onSaved={profile.refetch}
           />
         )}
-      </div>
+      </CardBody>
     </Card>
   );
 }
